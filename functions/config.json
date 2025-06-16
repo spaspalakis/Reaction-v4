@@ -1,0 +1,23 @@
+{
+    "broker": "apps.edutel.uniwa.gr:9092",
+    "producer_topic": "ObjectDetection",
+    "path_planning_topic": "PathPlanning_Input",
+    "command_control_topic": "CommandControl",
+    "batch_frame": 5,
+    "score_thres": 0.5,
+    "overlap_thres": 0.45,
+    "max_cosine_distance": 0.2,
+    "nn_budget": 100,
+    "model_path": "models/Reaction_v9i_736_small_b8_e300_tf",
+    "labels_path": "models/reaction.names",
+    "encoder_path": "models/mars-small128.pb",
+    "model_input_size": 736,
+    "message_size": 1,
+    "video_input_path": "video_input/Basket.mp4",
+    "frames_folder": "output/frames",
+    "video_output_folder": "output/videos",
+    "json_folder": "output/json_messages",
+    "frame_width": 1280,
+    "frame_height": 720,
+    "GeoLocation": "longitude: None, latitude: None, altitude: None"
+}

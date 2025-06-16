@@ -1,0 +1,117 @@
+{
+  "MissionName": "Test Mission 3",
+  "MissionId": "35c2ad16-6663-47e0-9cd3-9f52117bb5a6",
+  "Description": "Polygon-only mission",
+  "MissionType": "Testing",
+  "Issuer": {
+    "IssuerName": "Kostas",
+    "Certificate": "string",
+    "PublicKey": "string",
+    "UUID": "string",
+    "Param1": "",
+    "Param2": ""
+  },
+  "properties": {
+    "number_of_drones": 2,
+    "paths_strictly_in_poly": "True",
+    "percentage_of_sidelap": 72,
+    "scanning_density": 33,
+    "speed": 22,
+    "altitude": 100,
+    "frontlap": 20,
+    "portions": [
+      0.2,
+      0.8
+    ]
+  },
+  "Route": [],
+  "Geometries": [
+    {
+      "type": "Feature",
+      "properties": {
+        "GeometryID": "1f8eff46-d41c-4604-8814-e55c689f2d53",
+        "GeometryName": "Polygon 1",
+        "GeometryAction": "cover",
+        "Elevation": "0"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+				[
+					[
+						24.199019463618097,
+						40.8413189290344
+					],
+					[
+						24.199263209362325,
+						40.840986146854895
+					],
+					[
+						24.199742989499864,
+						40.84059654608268
+					],
+					[
+						24.200602637489137,
+						40.84128882762942
+					],
+					[
+						24.20007759507447,
+						40.84179323880156
+					],
+					[
+						24.19921995874196,
+						40.84205415073882
+					],
+					[
+						24.19875090744048,
+						40.84183297497865
+					],
+					[
+						24.198493750651178,
+						40.84160774018919
+					],
+					[
+						24.198756607134637,
+						40.84138386194775
+					],
+					[
+						24.199019463618097,
+						40.8413189290344
+					]
+				],
+				[
+					[
+						24.199219463618097,
+						40.8415189290344
+					],
+					[
+						24.199263209362325,
+						40.841086146854895
+					],
+					[
+						24.199742989499864,
+						40.84069654608268
+					],
+					[
+						24.199219463618097,
+						40.8415189290344
+					]
+				]
+			]
+      },
+      "initialPositions": {
+        "type": "MultiPoint",
+        "coordinates": [
+          [
+            24.199019463618097,
+            40.8413189290344
+          ],
+          [
+            24.199019463618097,
+            40.8413189290344
+          ]
+        ]
+      }
+    }
+  ]
+}

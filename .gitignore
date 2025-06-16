@@ -1,0 +1,7 @@
+/video_input/*.mp4
+/video_input/*.mov
+/video_input/*.avi
+/video_input/*.mkv
+/output/json_messages/*.json
+/logs/*.log
+/models/*

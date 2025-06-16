@@ -1,0 +1,114 @@
+{
+  "records": [
+    {
+      "value": {
+        "header": {
+          "topicName": "CommandControl",
+          "uav_status":"up",
+          "droneID": "drone_55",
+          "sentUTC": "2024-04-08T12:05:58.758893Z",
+          "district": "Athens",
+          "body": {
+            "missionID": "mission_1",
+            "attachments": [
+              {
+                "attachmentName": null,
+                "attachmentType": "video",
+                "attachmentFormat": null,
+                "attachmentFPS": 2,
+                "attachmentHeight": 720,
+                "attachmentWidth": 1280,
+                "attachmentGETURL": null
+              }
+            ],
+            "detection_list": [
+              {
+                "frameID": "15",
+                "detections": [
+                  {
+                    "objectID": 0,
+                    "class": "car",
+                    "confidence": 0.992,
+                    "bbox": {
+                      "x_min": "16",
+                      "y_min": "270",
+                      "x_max": "170",
+                      "y_max": "359"
+                    }
+                  },
+                  {
+                    "objectID": 1,
+                    "class": "car",
+                    "confidence": 0.99,
+                    "bbox": {
+                      "x_min": "446",
+                      "y_min": "127",
+                      "x_max": "549",
+                      "y_max": "190"
+                    }
+                  },
+                  {
+                    "objectID": 2,
+                    "class": "car",
+                    "confidence": 0.984,
+                    "bbox": {
+                      "x_min": "599",
+                      "y_min": "194",
+                      "x_max": "709",
+                      "y_max": "258"
+                    }
+                  },
+                  {
+                    "objectID": 3,
+                    "class": "car",
+                    "confidence": 0.975,
+                    "bbox": {
+                      "x_min": "0",
+                      "y_min": "345",
+                      "x_max": "105",
+                      "y_max": "460"
+                    }
+                  },
+                  {
+                    "objectID": 4,
+                    "class": "car",
+                    "confidence": 0.963,
+                    "bbox": {
+                      "x_min": "268",
+                      "y_min": "320",
+                      "x_max": "439",
+                      "y_max": "419"
+                    }
+                  },
+                  {
+                    "objectID": 5,
+                    "class": "human",
+                    "confidence": 0.931,
+                    "bbox": {
+                      "x_min": "702",
+                      "y_min": "132",
+                      "x_max": "830",
+                      "y_max": "209"
+                    }
+                  },
+                  {
+                    "objectID": 6,
+                    "class": "ship",
+                    "confidence": 0.882,
+                    "bbox": {
+                      "x_min": "289",
+                      "y_min": "166",
+                      "x_max": "424",
+                      "y_max": "251"
+                    }
+                  }
+                ],
+                "GeoLocation": "longitude: 23.735000, latitude: 37.980000, altitude: +19.0776"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

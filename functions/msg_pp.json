@@ -1,0 +1,75 @@
+{
+  "MissionName": "Test Mission 3",
+  "MissionId": "35c2ad16-6663-47e0-9cd3-9f52117bb5a6",
+  "Description": "Polygon-only mission",
+  "MissionType": "Testing",
+  "Issuer": {
+    "IssuerName": "Kostas",
+    "Certificate": "string",
+    "PublicKey": "string",
+    "UUID": "string",
+    "Param1": "",
+    "Param2": ""
+  },
+  "properties": {
+    "number_of_drones": 2,
+    "paths_strictly_in_poly": "True",
+    "percentage_of_sidelap": 72,
+    "scanning_density": 33,
+    "speed": 22,
+    "altitude": 100,
+    "frontlap": 20,
+    "portions": [
+      0.2,
+      0.8
+    ]
+  },
+  "Route": [],
+  "Geometries": [
+    {
+      "type": "Feature",
+      "properties": {
+        "GeometryID": "1f8eff46-d41c-4604-8814-e55c689f2d53",
+        "GeometryName": "Polygon 1",
+        "GeometryAction": "cover",
+        "Elevation": "0"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              23.74843805859978,
+              37.97638404818811
+            ],
+            [
+              23.79031809636623,
+              37.97381302651111
+            ],
+            [
+              23.7678333219916,
+              37.96339270089696
+            ],
+            [
+              23.74843805859978,
+              37.97638404818811
+            ]
+          ]
+        ]
+      },
+      "initialPositions": {
+        "type": "MultiPoint",
+        "coordinates": [
+          [
+            23.7425295207815,
+            38.112327069292
+          ],
+          [
+            23.7425295207815,
+            38.112327069292
+          ]
+        ]
+      }
+    }
+  ]
+}
