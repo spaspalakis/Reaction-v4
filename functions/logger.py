@@ -1,3 +1,13 @@
+"""
+log levels:
+
+logger.debug("This is a debug message")
+logger.info("This is an info message")
+logger.warning("This is a warning message")
+logger.error("This is an error message")
+logger.critical("This is a critical message")
+"""
+
 import logging
 import os
 from datetime import datetime
@@ -12,10 +22,15 @@ def setup_logger():
     
     # Create a logger
     logger = logging.getLogger('Reaction')
+    
+    # If logger already has handlers, return it
+    if logger.handlers:
+        return logger
+        
     logger.setLevel(logging.INFO)
     
     # Create a formatter
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     
     # Create file handler
     current_time = datetime.now().strftime('%Y%m%d_%H%M%S')

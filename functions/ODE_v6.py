@@ -27,6 +27,8 @@ from functions import create_video_webM as webm
 from functions import ManageKafka
 from functions.internet_utils import get_external_ip
 from functions.kafka_handler import KafkaHandler
+from functions.logger import setup_logger   
+logger = setup_logger()
 
 FONT_SIZE = 14
 OVERLAP_THRESHOLD = 0.5
@@ -95,8 +97,9 @@ class ObjectDetector:
         # Save locally
         with open(json_path, "w") as f:
             f.write(message_json)
-        print(f"\nJSON file saved: {json_path}")
-        
+        # print(f"\nJSON file saved: {json_path}")
+        logger.info(f"JSON file saved: {json_path}")
+
         # Add detected data to Kafka queue for sending
         self.kafka_handler.add_detection(message_json)
         
@@ -219,26 +222,29 @@ class ObjectDetector:
         start_time = time.time()
         fr_count = 0
         detections_count = 0
-        
+        last_polygon_state = None  # Track the last known polygon state
+
         try:
             while camera.isOpened() and self.kafka_handler.running:
                 frame_start_time = time.time()  # Start timing this frame
                 
                 ret, image = camera.read()
                 if not ret:
-                    dt.print_red("\n[ODE] Video Stream ended... Exiting!")
+                    logger.warning("\n[ODE] Video Stream ended... Exiting!")
                     break
                 
-                # Check if drone is in polygon, if not skip frames
-                if not self.kafka_handler.is_drone_in_polygon():
-                    fr_count += 1
-                    continue
+              
+                # # Check if drone is in polygon, if not skip frames
+                # if not self.kafka_handler.is_drone_in_polygon():
+                #     fr_count += 1
+                #     continue
                 
                 output_image = self.process_frame(image, infer, fr_count, self.ip, create_video)
                 
                 # Skip if no detections
                 if output_image is None:
                     fr_count += 1
+                    time.sleep(0.1)  # Prevent busy waiting
                     continue
                 
                  
@@ -257,30 +263,33 @@ class ObjectDetector:
                     im_path = f"{self.config['frames_folder']}/frame_{fr_count:04d}.jpg"
                     cv.imwrite(im_path, output_image)
                 
-            # Print stats every 100 frames
-            if len(frame_times) >= 100:
-                # Calculate average FPS over last 100 frames
-                avg_frame_time = sum(frame_times[-100:]) / 100
-                current_fps = 1.0 / avg_frame_time
+            # # Print stats every 100 frames
+            # if len(frame_times) >= 100:
+            #     # Calculate average FPS over last 100 frames
+            #     avg_frame_time = sum(frame_times[-100:]) / 100
+            #     current_fps = 1.0 / avg_frame_time
                 
-                # Calculate overall FPS
-                total_time = time.time() - start_time
-                overall_fps = fr_count / total_time
+            #     # Calculate overall FPS
+            #     total_time = time.time() - start_time
+            #     overall_fps = fr_count / total_time
                 
-                dt.print_magenta(f"\n[FPS Stats]")
-                dt.print_magenta(f"Current FPS (last 100 frames): {current_fps:.2f}")
-                dt.print_magenta(f"Overall FPS: {overall_fps:.2f}")
-                dt.print_magenta(f"Processed: {fr_count} total frames")
-                dt.print_magenta(f"Detections: {detections_count}")
-                dt.print_magenta(f"Batches sent: {batches_sent}")
+            #     dt.print_magenta(f"\n[FPS Stats]")
+            #     dt.print_magenta(f"Current FPS (last 100 frames): {current_fps:.2f}")
+            #     dt.print_magenta(f"Overall FPS: {overall_fps:.2f}")
+            #     dt.print_magenta(f"Processed: {fr_count} total frames")
+            #     dt.print_magenta(f"Detections: {detections_count}")
+            #     dt.print_magenta(f"Batches sent: {batches_sent}")
                 
-                # Keep only last 100 frame times to save memory
-                frame_times = frame_times[-100:]
+            #     # Keep only last 100 frame times to save memory
+            #     frame_times = frame_times[-100:]
 
+        except Exception as e:
+            logger.error(f"[ODE] Error in detection loop: {str(e)}")
+            raise
         finally:
             # Cleanup
             camera.release()
-            self.kafka_handler.stop()
+            logger.info("[ODE] Camera released")
         
         return True
 

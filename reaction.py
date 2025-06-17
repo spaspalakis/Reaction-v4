@@ -112,45 +112,88 @@ def main():
         time.sleep(1)
     logger.info("[Main] Received initial path planning message")
 
-    try:
-        while True:
+    # try:
+    #     while True:
 
-            current_drone_data = kafka_handler.get_current_metadata()
-            if current_drone_data["uav_status"] == "up":
+    #         current_drone_data = kafka_handler.get_current_metadata()
+    #         # logger.info(f"\ncurrent_drone_data: {current_drone_data}")
+
+    #         if current_drone_data["uav_status"] == "up":
+    #             # Check if drone is in valid position
+    #             if kafka_handler.is_drone_in_polygon():
+    #                 # print("\n[Main] Drone is INSIDE the polygon. Starting detection...")
+    #                 logger.info("[Main] Drone is INSIDE the polygon. Starting detection...")
+
+    #                 detector.update_metadata(current_drone_data)
+    #                 detector.run(config, camera, infer, args.create_video, args.save_frames)
+    #             else:
+    #                 # dt.print_yellow("\n[Main] Drone is OUTSIDE the polygon or in a NO-FLIGHT-ZONE.")
+    #                 logger.info("[Main] Drone is OUTSIDE the polygon or in a NFZ.")
+
+    #                 detector.stop_detection()
+                    
+    #         elif current_drone_data["uav_status"] == "down":
+    #             # print("\n[Main] UAV is down, waiting for status change...")
+    #             logger.info("[Main] UAV is down, waiting for status change...")
+
+    #             detector.stop_detection()
+    #         elif current_drone_data["uav_status"] == "exit":
+    #             # print("\n[Main] Exit signal received. Stopping...")
+    #             logger.info("[Main] Exit signal received. Stopping...")
+                
+    #             break
+
+    #         time.sleep(0.1)  # Prevent busy waiting
+
+    # except KeyboardInterrupt:
+    #     # print("\n[Main] Interrupted by user. Exiting...")
+    #     logger.info("[Main] Interrupted by user. Exiting...")
+    
+    # finally:
+    #     detector.stop_detection()
+    #     kafka_handler.stop()
+
+
+    try:
+         while True:
+             current_drone_data = kafka_handler.get_current_metadata()
+             
+            # Check UAV status
+             if current_drone_data["uav_status"] == "up":
+                # Update metadata before checking polygon
+                detector.update_metadata(current_drone_data)
+                
                 # Check if drone is in valid position
                 if kafka_handler.is_drone_in_polygon():
-                    # print("\n[Main] Drone is INSIDE the polygon. Starting detection...")
                     logger.info("[Main] Drone is INSIDE the polygon. Starting detection...")
-
-                    detector.update_metadata(current_drone_data)
+                    # Start detection loop
                     detector.run(config, camera, infer, args.create_video, args.save_frames)
                 else:
-                    # dt.print_yellow("\n[Main] Drone is OUTSIDE the polygon or in a NO-FLIGHT-ZONE.")
-                    logger.warning("[Main] Drone is OUTSIDE the polygon or in a NO-FLIGHT-ZONE.")
-
-                    detector.stop_detection()
+                    logger.info("[Main] Drone is OUTSIDE the polygon or in a NFZ.")
+                    # Skip frames by reading and discarding them
+                    ret, _ = camera.read()
+                    if not ret:
+                        logger.warning("[Main] Video stream ended while outside polygon")
+                        break
+                    time.sleep(0.1)  # Prevent busy waiting
                     
-            elif current_drone_data["uav_status"] == "down":
-                # print("\n[Main] UAV is down, waiting for status change...")
-                logger.info("[Main] UAV is down, waiting for status change...")
-
-                detector.stop_detection()
-            elif current_drone_data["uav_status"] == "exit":
-                # print("\n[Main] Exit signal received. Stopping...")
-                logger.info("[Main] Exit signal received. Stopping...")
-                
-                break
-
-            time.sleep(0.1)  # Prevent busy waiting
-
+                     
+             elif current_drone_data["uav_status"] == "down":
+                 logger.info("[Main] UAV is down, waiting for status change...")
+                 time.sleep(0.1)
+                 
+             elif current_drone_data["uav_status"] == "exit":
+                 logger.info("[Main] Exit signal received. Stopping...")
+                 break
+         
+             time.sleep(0.1)  # Prevent busy waiting
     except KeyboardInterrupt:
-        # print("\n[Main] Interrupted by user. Exiting...")
-        logger.info("[Main] Interrupted by user. Exiting...")
-    
+         logger.info("[Main] Interrupted by user. Exiting...")
+     
     finally:
-        detector.stop_detection()
-        kafka_handler.stop()
-
+         detector.stop_detection()
+         kafka_handler.stop()
+         
     # print('\n[Main] - Process stopped')         
     logger.info("[Main] - Process stopped")         
 
