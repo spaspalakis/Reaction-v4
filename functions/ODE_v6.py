@@ -28,6 +28,7 @@ from functions import ManageKafka
 from functions.internet_utils import get_external_ip
 from functions.kafka_handler import KafkaHandler
 from functions.logger import setup_logger   
+from functions.ngrok_service import get_ngrok_url
 logger = setup_logger()
 
 FONT_SIZE = 14
@@ -47,6 +48,14 @@ class ObjectDetector:
         self.classes_index = {x: y for (x, y) in enumerate(self.class_names)}
         
         self.ip = get_external_ip()
+        
+        # Get ngrok URL for image serving
+        # self.ngrok_url = get_ngrok_url()
+        # if self.ngrok_url:
+        #     logger.info(f"[ODE] Ngrok URL: {self.ngrok_url}")
+        # else:
+        #     logger.warning("[ODE] Failed to get ngrok URL, using local IP")
+        #     self.ngrok_url = f"http://{self.ip}:8000"
         
         self.video_writer = None
         self.video_open = False
@@ -112,6 +121,7 @@ class ObjectDetector:
             self.detection_map[frame_id] = {
                 "frameID": frame_id,
                 "imageURL": f"http://{ip}:8000/images/frame_{frame_id:04d}.jpg",
+                # "imageURL": f"{self.ngrok_url}/images/frame_{frame_id:04d}.jpg",
                 "detections": [],
                 "GeoLocation": {
                     "latitude": self.kafka_handler.get_current_metadata()["latitude"],
