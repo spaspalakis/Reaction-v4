@@ -15,9 +15,9 @@ def check_user_input(use_cam,rtsp_link):
     if use_cam:
         dt.print_green('Using HDMI input ..')
         # camera = cv.VideoCapture("v4l2src device=/dev/video0 ! video/x-raw, format=YUY2 ! videoconvert ! appsink", cv.CAP_GSTREAMER)
-        # camera = cv.VideoCapture("/dev/video0") 
+        camera = cv.VideoCapture("/dev/video0") 
         # camera = cv.VideoCapture(2) # OBS stream
-        camera = cv.VideoCapture("rtmp://127.0.0.1/live") # RTMP stream
+        # camera = cv.VideoCapture("rtmp://127.0.0.1/live") # RTMP stream
 
 
         dt.print_green(f'Camera is open: {camera.isOpened()}')
@@ -25,8 +25,9 @@ def check_user_input(use_cam,rtsp_link):
 
         fps = camera.get(cv.CAP_PROP_FPS)
         frame_height = int(camera.get(cv.CAP_PROP_FRAME_HEIGHT))
-        frame_width = int(camera.get(cv.CAP_PROP_FRAME_WIDTH))        
-        dt.print_green(f'\nFPS: {fps}\nHeight: {frame_height}\nWidth: {frame_width}\n')
+        frame_width = int(camera.get(cv.CAP_PROP_FRAME_WIDTH))  
+        img_size = (frame_width, frame_height)
+        dt.print_green(f'\nFPS: {fps}\n(H,W): {frame_height,frame_width}')
         
         if not camera.isOpened():
             dt.print_red('Camera not opened. Retrying...')
@@ -43,6 +44,7 @@ def check_user_input(use_cam,rtsp_link):
         camera = cv.VideoCapture(rtsp_link)
         frame_width = int(camera.get(cv.CAP_PROP_FRAME_WIDTH))
         frame_height = int(camera.get(cv.CAP_PROP_FRAME_HEIGHT))
+        img_size = (frame_width, frame_height)
 
         if not camera.isOpened():
             print('Error: Could not open video file.')
@@ -60,4 +62,4 @@ def check_user_input(use_cam,rtsp_link):
  
 
 
-    return camera,video_name,frame_width,frame_height
+    return camera,img_size

@@ -54,16 +54,11 @@ def get_arguments():
     
     parser.add_argument("--save-frames", action="store_true",
                         help="Write image into folder")
+        
+    parser.add_argument("--save-json", action="store_true",
+                        help="Save json into folder")
     
-    parser.add_argument("--create-video", action="store_true",
-                        help="Create new video on every 10 frames saved in the frames folder")
-    
-    
-    parser.add_argument("--init-vc", action="store_true",
-                        help="Initialize the video counter. Set video_counter=0 ")
-    
-
-    
+       
     return parser.parse_args()
 
 

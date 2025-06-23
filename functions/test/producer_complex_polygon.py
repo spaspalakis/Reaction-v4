@@ -7,7 +7,7 @@ import numpy as np
 
 KAFKA_BROKER = "apps.edutel.uniwa.gr:9092"
 TOPIC_PP = "PathPlanning_Input"
-TOPIC_CC = "CommandControl"
+TOPIC_TELEMETRY = "UAV_Telemetry"
 
 class ComplexPolygonProducer:
     def __init__(self, config):
@@ -28,11 +28,11 @@ class ComplexPolygonProducer:
         
         # Define movement states with their durations (in seconds)
         self.states = {
-            'outside': 20,  # 20 seconds outside
-            'inside': 50,   # 50 seconds inside
-            'no_flight': 40,  # 20 seconds in no-flight zone
-            'inside_again': 50,  # 50 seconds inside again
-            'outside_final': 20  # 20 seconds outside again
+            'outside': 10,  # 10 seconds outside
+            'inside': 10,   # 10 seconds inside
+            'no_flight': 10,  # 10 seconds in no-flight zone
+            'inside_again': 10,  # 10 seconds inside again
+            'outside_final': 10  # 10 seconds outside again
         }
         self.current_state = 0
         self.state_names = list(self.states.keys())
@@ -147,35 +147,31 @@ class ComplexPolygonProducer:
         location_status = self._get_location_status(point)
         
         # Create message in the correct format
+        drone_name = "Test"
+        drone_id = 2
         message = {
-            "records": [
-                {
-                    "value": {
-                        "header": {
-                            "topicName": "ObjectDetection",
-                            "msgIdentifier": str(int(time.time())),  # Use timestamp as identifier
-                            "uav_status": "up",
-                            "droneID": self.drone_id,
-                            "sentUTC": time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime()),
-                            "district": "Athens",
-                            "body": {
-                                "missionID": self.mission_id,
-                                "attachments": [],
-                                "detection_list": [],
-                                "GeoLocation": {
-                                    "latitude": f"{latitude:.8f}",
-                                    "longitude": f"{longitude:.8f}",
-                                    "altitude": f"{self.altitude:.2f}"
-                                }
-                            }
-                        }
-                    }
-                }
-            ]
+            "drone_name": drone_name,
+            "drone_id": drone_id,
+            "timestamp": time.time(),
+            "telemetry": {
+                "latitude": latitude,
+                "longitude": longitude,
+                "altitude": self.altitude,
+                "heading": 97.44,
+                "velocity": 19.20062681907261,
+                "gpsSignal": 0,
+                "satelliteNumber": 10,
+                "homeLatitude": 0,
+                "homeLongitude": 0,
+                "droneState": "Flying",
+                "gimbalAngle": -90,
+                "batteryPercentage": 94.0,
+                "vtolState": "FW"
+            }
         }
         
         self.producer.produce(
-            TOPIC_CC,
+            TOPIC_TELEMETRY,
             key=self.drone_id,
             value=json.dumps(message)
         )
@@ -185,31 +181,46 @@ class ComplexPolygonProducer:
         print(f"State: {self.state_names[self.current_state]}")
         print(f"Time remaining in state: {self.states[self.state_names[self.current_state]] - (self.current_point_index * 2)} seconds")
 
+    def start_detector(self):
+        if not hasattr(self, '_detector_active') or not self._detector_active:
+            print("\n[DETECTOR] Detector started: Reading frames from camera...")
+            self._detector_active = True
+
+    def stop_detector(self):
+        if hasattr(self, '_detector_active') and self._detector_active:
+            print("\n[DETECTOR] Detector stopped: Stopped reading frames from camera.")
+            self._detector_active = False
+
     def run(self):
         """Run the producer simulation"""
         print("\nStarting complex polygon producer simulation...")
-        
         # First, send the path planning data
         print("\nStep 1: Sending Path Planning data...")
         self.send_path_planning()
-        
         # Wait for 10 seconds to ensure path planning is processed
         print("Waiting 10 seconds for path planning to be processed...")
         time.sleep(10)
-        
         # Then start the drone movement simulation
         print("\nStep 2: Starting drone movement simulation...")
         print("Drone will follow this sequence:")
-        print("1. Start outside main polygon (20 seconds)")
-        print("2. Move inside main polygon (50 seconds)")
-        print("3. Enter no-flight zone (20 seconds)")
-        print("4. Return inside main polygon (50 seconds)")
-        print("5. Move outside again (20 seconds)\n")
-        
+        print("1. Start outside main polygon (10 seconds)")
+        print("2. Move inside main polygon (10 seconds)")
+        print("3. Enter no-flight zone (10 seconds)")
+        print("4. Return inside main polygon (10 seconds)")
+        print("5. Move outside again (10 seconds)\n")
+
+        self._detector_active = False
+        prev_state = None
         while self.current_state < len(self.states):
             current_state = self.state_names[self.current_state]
             points = self.movement_points[current_state]
-            
+
+            # Detector logic: start/stop on entering/leaving inside states
+            if current_state in ["inside", "inside_again"] and not self._detector_active:
+                self.start_detector()
+            elif current_state not in ["inside", "inside_again"] and self._detector_active:
+                self.stop_detector()
+
             if self.current_point_index >= len(points):
                 self.current_state += 1
                 self.current_point_index = 0
@@ -217,13 +228,15 @@ class ComplexPolygonProducer:
                     break
                 print(f"\nTransitioning to state: {self.state_names[self.current_state]}")
                 continue
-            
+
             longitude, latitude = points[self.current_point_index]
             self.send_drone_position(longitude, latitude)
-            
             self.current_point_index += 1
             time.sleep(2)  # Wait 2 seconds between messages
-        
+
+        # Ensure detector is stopped at the end
+        if self._detector_active:
+            self.stop_detector()
         print("\nSimulation completed!")
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ from functions import display_tools as dt
 
 
 class Message:
-    def __init__(self, uav_status, droneID, mission_id, geolocation):
+    def __init__(self, uav_status, droneID,drone_name, geolocation):
         self.message = {
             "records": [
                 {
@@ -22,11 +22,10 @@ class Message:
                             "msgIdentifier": str(random.randint(1000, 9999)),
                             "uav_status": uav_status,
                             "droneID": droneID,
+                            "drone_name": drone_name,
                             "sentUTC": datetime.utcnow().isoformat() + "Z",
                             "district": "Athens",
                             "body": {
-                                "missionID": mission_id,
-                                "attachments": [],
                                 "detection_list": []
                             }
                         }
@@ -37,19 +36,6 @@ class Message:
         # self.geolocation = geolocation
         self.detection_map = {}
 
-
-
-    def add_attachment(self, name, attachment_type, format, fps, height, width, url):
-        attachment = {
-            "attachmentName": name,
-            "attachmentType": attachment_type,
-            "attachmentFormat": format,
-            "attachmentFPS": fps,
-            "attachmentHeight": height,
-            "attachmentWidth": width,
-            "attachmentURL": url
-        }
-        self.message["records"][0]["value"]["header"]["body"]["attachments"].append(attachment)
 
 
     def add_detection(self, frame_id, object_id, object_class, confidence, bbox):
@@ -202,89 +188,74 @@ class Consumer_PathPlanning:
 
 
 
-class Consumer_CommandControl:
+class Consumer_UAV_Telemetry:
     def __init__(self, broker='apps.edutel.uniwa.gr:9092'):
         self.conf = {
             'bootstrap.servers': broker,
             'security.protocol': 'PLAINTEXT',
-            'group.id': 'reaction-consumer',
+            'group.id': 'ode-v2-consumer',
             'auto.offset.reset': 'latest'
         }
-        self.topic_in = 'CommandControl'
-        print(f"[Consumer_CC] Initializing with broker: {broker}")
+        self.topic_in = 'UAV_Telemetry'
+        print(f"[Consumer_Telemetry] Initializing with broker: {broker}")
         self.consumer = Consumer(self.conf)
 
     def start(self):
         """Initialize the Kafka consumer and subscribe to the topic."""
         try:
             self.consumer.subscribe([self.topic_in])
-            print(f"[Consumer_CC] Successfully subscribed to topic: {self.topic_in}")
+            print(f"[Consumer_Telemetry] Successfully subscribed to topic: {self.topic_in}")
         except Exception as e:
-            print(f"[Consumer_CC] Error subscribing to topic: {e}")
+            print(f"[Consumer_Telemetry] Error subscribing to topic: {e}")
+
 
     def get_latest_message(self):
         """
-        Get the latest message from the Kafka topic.
-        Returns a dictionary with UAV status and drone ID, or None if no message is received.
+        Get the latest message from the UAV_Telemetry Kafka topic.
+        Returns a dictionary with only the required fields and polygon check.
         """
+
         try:
             msg = self.consumer.poll(1.0)  # Poll for messages every second
 
             if msg is None:
                 return None
             if msg.error():
-                print(f"[Consumer_CC] Kafka error: {msg.error()}")
+                print(f"[Consumer_Telemetry] Kafka error: {msg.error()}")
                 return None
 
             try:
                 message = json.loads(msg.value().decode('utf-8'))
-                # print(f"\n[Consumer_CC] Received raw message: {message}")
-
-                records = message.get("records", [])
-
-                if not records:
-                    print("[Consumer_CC] No records found in message")
-                    return None
-
-                value = records[0].get("value", {})
-                header = value.get("header", {})
-                body = header.get("body", {})  # Extract body safely
-
-                # Extract header properly
-                uav_status = header.get("uav_status", "down")  # default value down
-                droneID = header.get("droneID", "unknown")
-                missionID = body.get("missionID", "unknown")
-
-                # Get geolocation directly from the GeoLocation field
-                geolocation = body.get("GeoLocation", {})
-                
+                telemetry = message.get("telemetry", {})
                 result = {
-                    "uav_status": uav_status, 
-                    "droneID": droneID,
-                    "missionID": missionID,
-                    "longitude": geolocation.get("longitude"),
-                    "latitude": geolocation.get("latitude"),
-                    "altitude": geolocation.get("altitude")
+                    "drone_name": message.get("drone_name", "unknown"),
+                    "drone_id": message.get("drone_id", "unknown"),
+                    "latitude": telemetry.get("latitude"),
+                    "longitude": telemetry.get("longitude"),
+                    "altitude": telemetry.get("altitude"),
+                    "uav_status": telemetry.get("droneState"),
+                    "gimbalAngle": telemetry.get("gimbalAngle"),
+                    "heading": telemetry.get("heading")
                 }
-                # dt.print_magenta(f"[Consumer_CC] Processed message: {result}")
+                
                 return result
 
             except json.JSONDecodeError as e:
-                print(f"[Consumer_CC] Error decoding message: {e}")
+                print(f"[Consumer_Telemetry] Error decoding message: {e}")
                 return None
             except KeyError as e:
-                print(f"[Consumer_CC] Missing key in message: {e}")
+                print(f"[Consumer_Telemetry] Missing key in message: {e}")
                 return None
             except Exception as e:
-                print(f"[Consumer_CC] Error processing message: {e}")
+                print(f"[Consumer_Telemetry] Error processing message: {e}")
                 return None
 
         except Exception as e:
-            print(f"[Consumer_CC] Error in get_latest_message: {e}")
+            print(f"[Consumer_Telemetry] Error in get_latest_message: {e}")
             return None
 
     def stop(self):
         """Cleanly close the consumer."""
         self.consumer.close()
-        print("\n[Consumer_CC] Stopped.")
+        print("\n[Consumer_Telemetry] Stopped.")
 

@@ -4,7 +4,7 @@ import time
 from typing import Optional, Dict, Any
 from shapely.geometry import Point, Polygon
 from functions import display_tools as dt
-from functions.ManageKafka import Consumer_CommandControl, Consumer_PathPlanning, KafkaProducer, Message
+from functions.ManageKafka import Consumer_UAV_Telemetry, Consumer_PathPlanning, KafkaProducer, Message
 
 class KafkaHandler:
     """
@@ -17,7 +17,7 @@ class KafkaHandler:
     This class uses separate threads to prevent Kafka operations from blocking
     the main detection loop.
     """
-    def __init__(self, broker: str, producer_topic: str, command_control_topic: str, path_planning_topic: str):
+    def __init__(self, broker: str, producer_topic: str, path_planning_topic: str,UAV_Telemetry_topic: str):
         """
         Initialize the Kafka handler with configuration.
         
@@ -29,11 +29,11 @@ class KafkaHandler:
         """
         # Initialize Kafka clients with correct broker
         self.consumer_pp = Consumer_PathPlanning(broker=broker)
-        self.consumer_cc = Consumer_CommandControl(broker=broker)
+        self.consumer_telemetry = Consumer_UAV_Telemetry(broker=broker)
         self.kafka_producer = KafkaProducer(broker, producer_topic)
         
         # Set topics
-        self.consumer_cc.topic_in = command_control_topic
+        self.consumer_telemetry.topic_in = UAV_Telemetry_topic
         self.consumer_pp.topic_in = path_planning_topic
         
         # Queues for thread-safe communication between threads
@@ -44,18 +44,21 @@ class KafkaHandler:
         self.running = False
         self.last_message_time = time.time()
         self._latest_pp_message: Optional[Dict[str, Any]] = None
-        self._latest_cc_message: Optional[Dict[str, Any]] = None
+        self._latest_telemetry_message: Optional[Dict[str, Any]] = None
         self._pp_lock = threading.Lock()
-        self._cc_lock = threading.Lock()
+        self._telemetry_lock = threading.Lock()
         
         # Current state - stores latest metadata from CommandControl
         self.current_metadata = {
             "uav_status": "down",
             "droneID": "None",
-            "missionID": "None",
+            # "missionID": "None",
             "latitude": "0.00000000",
             "longitude": "0.00000000",
-            "altitude": "0.00"
+            "altitude": "0.00",
+            "drone_name": "Unknown",
+            "gimbalAngle": "None",
+            "heading": "None"
         }
         
         # Thread instances
@@ -69,7 +72,7 @@ class KafkaHandler:
         - Sender thread: Processes detection messages from queue
         """
         # Start consumers
-        self.consumer_cc.start()
+        self.consumer_telemetry.start()
         self.consumer_pp.start()
         
         # Start handler threads
@@ -92,7 +95,7 @@ class KafkaHandler:
             self.sender_thread.join()
             
         # Stop consumers
-        self.consumer_cc.stop()
+        self.consumer_telemetry.stop()
         self.consumer_pp.stop()
         
         dt.print_green("[KafkaHandler] Stopped all threads")
@@ -116,18 +119,18 @@ class KafkaHandler:
                         self._latest_pp_message = pp_message
                 
                 # Then check command control messages
-                message_cc = self.consumer_cc.get_latest_message()
-                if message_cc:
-                    with self._cc_lock:
-                        self._latest_cc_message = message_cc
+                message_telemetry = self.consumer_telemetry.get_latest_message()
+                if message_telemetry:
+                    with self._telemetry_lock:
+                        self._latest_telemetry_message = message_telemetry
                     # dt.print_blue(f"[KafkaHandler] Received command control message: {message_cc}")
                     self.last_message_time = time.time()
-                    self._update_metadata(message_cc)
+                    self._update_metadata(message_telemetry)
                     
                     # Check drone position
                     try:
-                        lon = float(message_cc.get("longitude", "0.0"))
-                        lat = float(message_cc.get("latitude", "0.0"))
+                        lon = float(message_telemetry.get("longitude", "0.0"))
+                        lat = float(message_telemetry.get("latitude", "0.0"))
                         drone_point = Point(lon, lat)
                         
                         # Update metadata queue with current state
@@ -174,11 +177,14 @@ class KafkaHandler:
         try:
             self.current_metadata = {
                 "uav_status": message.get("uav_status", "down"),
-                "droneID": message.get("droneID", "None"),
-                "missionID": message.get("missionID", "None"),
-                "latitude": f"{float(message.get('latitude', 0.0)):.8f}",
-                "longitude": f"{float(message.get('longitude', 0.0)):.8f}",
-                "altitude": f"{float(message.get('altitude', 0.0)):.2f}"
+                "droneID": message.get("drone_id", "None"),
+                # "missionID": message.get("missionID", "None"),
+                "latitude": message.get('latitude', 0.0),
+                "longitude": message.get('longitude', 0.0),
+                "altitude": message.get('altitude', 0.0),
+                "drone_name": message.get("drone_name", "Unknown"),
+                "gimbalAngle": message.get("gimbalAngle", "None"),
+                "heading": message.get("heading", "None")
             }
         except (ValueError, TypeError) as e:
             dt.print_red(f"[KafkaHandler] Error updating metadata: {e}")
@@ -217,13 +223,13 @@ class KafkaHandler:
         with self._pp_lock:
             return self._latest_pp_message
     
-    def get_latest_cc_message(self):
+    def get_latest_telemetry_message(self):
         """
         Get the latest message from the command control consumer.
         Returns the message or None if no message is available.
         """
-        with self._cc_lock:
-            return self._latest_cc_message
+        with self._telemetry_lock:
+            return  self._latest_telemetry_message
 
     def is_drone_in_polygon(self) -> bool:
         """

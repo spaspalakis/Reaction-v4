@@ -2,7 +2,7 @@
     "broker": "apps.edutel.uniwa.gr:9092",
     "producer_topic": "ObjectDetection",
     "path_planning_topic": "PathPlanning_Input",
-    "command_control_topic": "CommandControl",
+    "UAV_Telemetry_topic": "UAV_Telemetry",
     "batch_frame": 5,
     "score_thres": 0.5,
     "overlap_thres": 0.45,
@@ -17,7 +17,5 @@
     "frames_folder": "output/frames",
     "video_output_folder": "output/videos",
     "json_folder": "output/json_messages",
-    "frame_width": 1280,
-    "frame_height": 720,
     "GeoLocation": "longitude: None, latitude: None, altitude: None"
 }

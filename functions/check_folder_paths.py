@@ -4,7 +4,7 @@ import sys
 from functions import display_tools as dt
 
 
-def folder_paths (frames_folder,json_folder,video_path,video_output,init_video_counter):
+def folder_paths (frames_folder,json_folder,video_path,video_output):
 
     ### Check if snapshots folder path exists (frames that will be saved).
     print('\n---\n[Check folder paths] Initialize existance of path folders:')
@@ -30,8 +30,4 @@ def folder_paths (frames_folder,json_folder,video_path,video_output,init_video_c
         dt.print_red ("Some folder path does not exist! Check again!")
         sys.exit()
 
-    # Initialize the video counter into the .txt file    
-    if init_video_counter:
-        print('\nInitialize the counter. Video_counter is set to 0')
-        with open("video_counter.txt", "w") as file:
-            file.write("0")
+

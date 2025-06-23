@@ -23,12 +23,13 @@ from functions import nms_tf as nms
 from functions import filter_duplicates
 from functions import create_final_track_list
 from functions import display_bboxes_cv3 as dspl_bboxes_cv3
-from functions import create_video_webM as webm
 from functions import ManageKafka
 from functions.internet_utils import get_external_ip
 from functions.kafka_handler import KafkaHandler
 from functions.logger import setup_logger   
+from functions.obj_geolocation import pixel_to_gps
 from functions.ngrok_service import get_ngrok_url
+
 logger = setup_logger()
 
 FONT_SIZE = 14
@@ -49,14 +50,6 @@ class ObjectDetector:
         
         self.ip = get_external_ip()
         
-        # Get ngrok URL for image serving
-        # self.ngrok_url = get_ngrok_url()
-        # if self.ngrok_url:
-        #     logger.info(f"[ODE] Ngrok URL: {self.ngrok_url}")
-        # else:
-        #     logger.warning("[ODE] Failed to get ngrok URL, using local IP")
-        #     self.ngrok_url = f"http://{self.ip}:8000"
-        
         self.video_writer = None
         self.video_open = False
         self.frame_data = []
@@ -74,10 +67,13 @@ class ObjectDetector:
         self.kafka_handler.current_metadata.update({
             "uav_status": metadata.get("uav_status", "down"),
             "droneID": metadata.get("droneID", "None"),
-            "missionID": metadata.get("missionID", "None"),
+            # "missionID": metadata.get("missionID", "None"),
             "latitude": metadata.get("latitude", "0.00000000"),
             "longitude": metadata.get("longitude", "0.00000000"),
-            "altitude": metadata.get("altitude", "0.00")
+            "altitude": metadata.get("altitude", "0.00"),
+            "drone_name": metadata.get("drone_name", "Unknown"),
+            "gimbalAngle": metadata.get("gimbalAngle", "None"),
+            "heading": metadata.get("heading", "None")
         })
 
 
@@ -89,7 +85,9 @@ class ObjectDetector:
         message_obj = ManageKafka.Message(
             uav_status=self.kafka_handler.get_current_metadata()["uav_status"],
             droneID=self.kafka_handler.get_current_metadata()["droneID"],
-            mission_id=self.kafka_handler.get_current_metadata()["missionID"],
+            # mission_id=self.kafka_handler.get_current_metadata()["missionID"],
+            drone_name=self.kafka_handler.get_current_metadata()["drone_name"],
+
             geolocation={
                 "latitude": self.kafka_handler.get_current_metadata()["latitude"],
                 "longitude": self.kafka_handler.get_current_metadata()["longitude"],
@@ -115,13 +113,12 @@ class ObjectDetector:
         # Reset detection map for next batch
         self.detection_map = {}
 
-    def add_detection(self, ip, frame_id, object_id, object_class, confidence, bbox):
+    def add_detection(self,img_size, ip, frame_id, object_id, object_class, confidence, bbox):
         """Store detection under the correct frameID."""
         if frame_id not in self.detection_map:
             self.detection_map[frame_id] = {
                 "frameID": frame_id,
                 "imageURL": f"http://{ip}:8000/images/frame_{frame_id:04d}.jpg",
-                # "imageURL": f"{self.ngrok_url}/images/frame_{frame_id:04d}.jpg",
                 "detections": [],
                 "GeoLocation": {
                     "latitude": self.kafka_handler.get_current_metadata()["latitude"],
@@ -130,11 +127,27 @@ class ObjectDetector:
                 }
             }
         
+        fov = (68, 40)
+        telemetry = self.kafka_handler._latest_telemetry_message or {}
+        lat = self.kafka_handler.get_current_metadata()["latitude"] #telemetry.get("latitude", 0.0)
+        lon = self.kafka_handler.get_current_metadata()["longitude"] #telemetry.get("longitude", 0.0)
+        alt = self.kafka_handler.get_current_metadata()["altitude"] #telemetry.get("altitude", 0.0)
+        heading = self.kafka_handler.get_current_metadata()["heading"] #telemetry.get("heading", 0.0)
+        pitch =  self.kafka_handler.get_current_metadata()["gimbalAngle"] #telemetry.get("gimbalAngle", 0.0)
+
+        drone_info = (lat, lon, alt, heading, pitch)
+        
+        # Calculate center pixel of bbox
+        x1, y1, x2, y2 = bbox    
+        center_pixel = (int((x1 + x2) / 2), int((y1 + y2) / 2))
+        obj_gps = pixel_to_gps(center_pixel, img_size, fov, drone_info)
+
         self.detection_map[frame_id]["detections"].append({
             "objectID": object_id,
             "class": object_class,
             "confidence": confidence,
-            "bbox": bbox
+            "bbox": bbox,
+            "obj_geolocation": obj_gps
         })
 
     def finalize_detections(self, message_obj):
@@ -142,7 +155,7 @@ class ObjectDetector:
         for frame_data in self.detection_map.values():
             message_obj.message["records"][0]["value"]["header"]["body"]["detection_list"].append(frame_data)
 
-    def process_frame(self, image, infer, frame_id, ip, create_video):
+    def process_frame(self, image, infer, frame_id, ip,img_size):
         """Process a single frame and return annotated image and detected tracks."""
 
         original_image = image.copy()
@@ -161,9 +174,6 @@ class ObjectDetector:
 
         if len(boxes) > 0:
             
-            if create_video:
-                self.start_video_writer()
-
             # Deep SORT tracking
             boxes2 = boxes.copy().astype(int)
             boxes2[:, [2, 3]] = boxes2[:, [2, 3]] - boxes2[:, [0, 1]]
@@ -210,6 +220,8 @@ class ObjectDetector:
                 
                 for i in range(len(filtered_boxes)):
                     self.add_detection(
+                        img_size, 
+
                         ip=ip,
                         frame_id=frame_id,
                         object_id=filtered_track_ids[i],
@@ -224,7 +236,7 @@ class ObjectDetector:
             return None
             
 
-    def run(self, config, camera, infer, create_video, save_frames):
+    def run(self,img_size, config, camera, infer, save_frames,save_json):
         """Main detection loop."""
 
         batches_sent = 0
@@ -243,13 +255,14 @@ class ObjectDetector:
                     logger.warning("\n[ODE] Video Stream ended... Exiting!")
                     break
                 
+                dt.print_green(f"[ODE] fr: {fr_count}")
               
-                # # Check if drone is in polygon, if not skip frames
-                # if not self.kafka_handler.is_drone_in_polygon():
-                #     fr_count += 1
-                #     continue
+                # Check if drone is in polygon, if not skip frames
+                if not self.kafka_handler.is_drone_in_polygon():
+                    fr_count += 1
+                    continue
                 
-                output_image = self.process_frame(image, infer, fr_count, self.ip, create_video)
+                output_image = self.process_frame(image, infer, fr_count, self.ip,img_size)
                 
                 # Skip if no detections
                 if output_image is None:
@@ -258,16 +271,18 @@ class ObjectDetector:
                     continue
                 
                  
-                # Calculate frame processing time
-                frame_time = time.time() - frame_start_time
-                frame_times.append(frame_time)
+                # # Calculate frame processing time
+                # frame_time = time.time() - frame_start_time
+                # frame_times.append(frame_time)
                 
                 fr_count += 1
                 detections_count += 1
                 
                 if detections_count % config['message_size'] == 0:
-                    self.save_json(detections_count)
-                    batches_sent += 1
+                    if save_json:
+
+                        self.save_json(detections_count)
+                        batches_sent += 1
                 
                 if save_frames:
                     im_path = f"{self.config['frames_folder']}/frame_{fr_count:04d}.jpg"

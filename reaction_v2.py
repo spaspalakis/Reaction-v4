@@ -10,6 +10,7 @@ version 2:
 -2/6 Create random drone move based the Path Planning polygon
 -11/6 1. get_external_ip method is now an stand alone fucntion
      2. KafkaHandler introduced for thread-safe Kafka operations
+
 """
 
 import os
@@ -38,7 +39,7 @@ from functions import arguments
 from functions import display_tools as dt
 from functions import user_input
 from functions import check_folder_paths
-from functions import ODE_v6
+from functions import ODE_v2
 from functions.kafka_handler import KafkaHandler
 
 def main():
@@ -68,19 +69,19 @@ def main():
         config["json_folder"],
         config["video_input_path"],
         config["video_output_folder"],
-        args.init_vc
     )
 
     # Check user input: Read VIDEO or CAMERA
-    camera, video_name, frame_width, frame_height = user_input.check_user_input(args.use_cam, config["video_input_path"])
+    camera, img_size = user_input.check_user_input(args.use_cam, config["video_input_path"])
+    
 
     # Update config with frame dimensions
-    config["frame_width"] = frame_width
-    config["frame_height"] = frame_height
+    # config["frame_width"] = frame_width
+    # config["frame_height"] = frame_height
     
     # Save updated config
-    with open("functions/config.json", "w") as config_file:
-        json.dump(config, config_file, indent=4)
+    # with open("functions/config.json", "w") as config_file:
+    #     json.dump(config, config_file, indent=4)
 
     # Load model
     dt.print_green("\n-----\nModel is loading...")  
@@ -97,13 +98,13 @@ def main():
     kafka_handler = KafkaHandler(
         broker=config['broker'],
         producer_topic=config['producer_topic'],
-        command_control_topic=config['command_control_topic'],
-        path_planning_topic=config['path_planning_topic']
+        path_planning_topic=config['path_planning_topic'],
+        UAV_Telemetry_topic=config['UAV_Telemetry_topic']
     )
     kafka_handler.start()
     
     # Create detector instance
-    detector = ODE_v6.ObjectDetector(config, kafka_handler)
+    detector = ODE_v2.ObjectDetector(config, kafka_handler)
 
     # Wait for initial path planning message
     logger = setup_logger()
@@ -112,81 +113,28 @@ def main():
         time.sleep(1)
     logger.info("[Main] Received initial path planning message")
 
-    # try:
-    #     while True:
-
-    #         current_drone_data = kafka_handler.get_current_metadata()
-    #         # logger.info(f"\ncurrent_drone_data: {current_drone_data}")
-
-    #         if current_drone_data["uav_status"] == "up":
-    #             # Check if drone is in valid position
-    #             if kafka_handler.is_drone_in_polygon():
-    #                 # print("\n[Main] Drone is INSIDE the polygon. Starting detection...")
-    #                 logger.info("[Main] Drone is INSIDE the polygon. Starting detection...")
-
-    #                 detector.update_metadata(current_drone_data)
-    #                 detector.run(config, camera, infer, args.create_video, args.save_frames)
-    #             else:
-    #                 # dt.print_yellow("\n[Main] Drone is OUTSIDE the polygon or in a NO-FLIGHT-ZONE.")
-    #                 logger.info("[Main] Drone is OUTSIDE the polygon or in a NFZ.")
-
-    #                 detector.stop_detection()
-                    
-    #         elif current_drone_data["uav_status"] == "down":
-    #             # print("\n[Main] UAV is down, waiting for status change...")
-    #             logger.info("[Main] UAV is down, waiting for status change...")
-
-    #             detector.stop_detection()
-    #         elif current_drone_data["uav_status"] == "exit":
-    #             # print("\n[Main] Exit signal received. Stopping...")
-    #             logger.info("[Main] Exit signal received. Stopping...")
-                
-    #             break
-
-    #         time.sleep(0.1)  # Prevent busy waiting
-
-    # except KeyboardInterrupt:
-    #     # print("\n[Main] Interrupted by user. Exiting...")
-    #     logger.info("[Main] Interrupted by user. Exiting...")
-    
-    # finally:
-    #     detector.stop_detection()
-    #     kafka_handler.stop()
-
-
     try:
-         while True:
-             current_drone_data = kafka_handler.get_current_metadata()
-             
-            # Check UAV status
-             if current_drone_data["uav_status"] == "up":
-                # Update metadata before checking polygon
-                detector.update_metadata(current_drone_data)
+        while True:
+            current_drone_data = kafka_handler.get_current_metadata() 
+     
+            # Update metadata before checking polygon
+            detector.update_metadata(current_drone_data)
                 
-                # Check if drone is in valid position
-                if kafka_handler.is_drone_in_polygon():
-                    logger.info("[Main] Drone is INSIDE the polygon. Starting detection...")
-                    # Start detection loop
-                    detector.run(config, camera, infer, args.create_video, args.save_frames)
-                else:
-                    logger.info("[Main] Drone is OUTSIDE the polygon or in a NFZ.")
-                    # Skip frames by reading and discarding them
-                    ret, _ = camera.read()
-                    if not ret:
-                        logger.warning("[Main] Video stream ended while outside polygon")
-                        break
-                    time.sleep(0.1)  # Prevent busy waiting
+            # Check if drone is in valid position
+            if kafka_handler.is_drone_in_polygon():
+                logger.info("[Main] Drone is INSIDE the polygon. Starting detection...")
+                # Start detection loop
+                detector.run(img_size, config, camera, infer, args.save_frames,args.save_json)
+            else:
+                logger.info("[Main] Drone is OUTSIDE the polygon or in a NFZ.")
+                # Skip frames by reading and discarding them
+                # ret, _ = camera.read()
+                # if not ret:
+                #     logger.warning("[Main] Video stream ended while outside polygon")
+                #     break
+                # time.sleep(0.1)  # Prevent busy waiting
                     
-                     
-             elif current_drone_data["uav_status"] == "down":
-                 logger.info("[Main] UAV is down, waiting for status change...")
-                 time.sleep(0.1)
-                 
-             elif current_drone_data["uav_status"] == "exit":
-                 logger.info("[Main] Exit signal received. Stopping...")
-                 break
-         
-             time.sleep(0.1)  # Prevent busy waiting
+            time.sleep(0.1)  # Prevent busy waiting
     except KeyboardInterrupt:
          logger.info("[Main] Interrupted by user. Exiting...")
      

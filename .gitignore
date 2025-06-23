@@ -1,7 +1,19 @@
-/video_input/*.mp4
-/video_input/*.mov
-/video_input/*.avi
-/video_input/*.mkv
-/output/json_messages/*.json
-/logs/*.log
+# Ignore everything in models except .gitkeep
 /models/*
+!/models/.gitkeep
+
+# Ignore all jpg images in output/frames except .gitkeep
+/output/frames/*
+!/output/frames/.gitkeep
+
+# Ignore all json files in output/json_messages except .gitkeep
+/output/json_messages/*
+!/output/json_messages/.gitkeep
+
+# Ignore all videos in video_input except .gitkeep
+/video_input/*
+!/video_input/.gitkeep
+
+# Ignore all log files in logs except .gitkeep
+/logs/*
+!/logs/.gitkeep
