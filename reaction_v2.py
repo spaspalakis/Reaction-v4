@@ -1,5 +1,11 @@
 """
 version 2:
+This is an upgraded version from simple-Reactions.
+It simulated a drone move: inside and outside a polygon
+The detector is triggered automatically when the telemetry of the drone is in the polygon,
+if the telemetry is outside the polygon or in a non-flight zone the detector just skipping the frames.
+
+
 
 -31/3 OOP logic introduced
 -29/4 Sever logic introduced. Try to pass images over the internet and display them into the dashboard
@@ -10,6 +16,8 @@ version 2:
 -2/6 Create random drone move based the Path Planning polygon
 -11/6 1. get_external_ip method is now an stand alone fucntion
      2. KafkaHandler introduced for thread-safe Kafka operations
+
+--24/6 Change message structure: add obj_geolocation (Final version)
 
 """
 
