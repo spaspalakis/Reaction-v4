@@ -47,6 +47,8 @@ class KafkaHandler:
         self._latest_telemetry_message: Optional[Dict[str, Any]] = None
         self._pp_lock = threading.Lock()
         self._telemetry_lock = threading.Lock()
+        self._end_session = False
+        self._end_session_lock = threading.Lock()
         
         # Current state - stores latest metadata from CommandControl
         self.current_metadata = {
@@ -121,6 +123,13 @@ class KafkaHandler:
                 # Then check command control messages
                 message_telemetry = self.consumer_telemetry.get_latest_message()
                 if message_telemetry:
+                    # Check for end of session signal
+                    if message_telemetry.get("end_session") is True:
+                        dt.print_red("[KafkaHandler] Received end_session signal.")
+                        with self._end_session_lock:
+                            self._end_session = True
+                        # The main loop in reaction_v2.py will handle stopping.
+
                     with self._telemetry_lock:
                         self._latest_telemetry_message = message_telemetry
                     # dt.print_blue(f"[KafkaHandler] Received command control message: {message_cc}")
@@ -129,8 +138,9 @@ class KafkaHandler:
                     
                     # Check drone position
                     try:
-                        lon = float(message_telemetry.get("longitude", "0.0"))
-                        lat = float(message_telemetry.get("latitude", "0.0"))
+                        telemetry_payload = message_telemetry.get("telemetry", {})
+                        lon = float(telemetry_payload.get("longitude", "0.0"))
+                        lat = float(telemetry_payload.get("latitude", "0.0"))
                         drone_point = Point(lon, lat)
                         
                         # Update metadata queue with current state
@@ -175,16 +185,17 @@ class KafkaHandler:
         Handles conversion and formatting of values.
         """
         try:
+            telemetry_payload = message.get("telemetry", {})
             self.current_metadata = {
                 "uav_status": message.get("uav_status", "down"),
                 "droneID": message.get("drone_id", "None"),
                 # "missionID": message.get("missionID", "None"),
-                "latitude": message.get('latitude', 0.0),
-                "longitude": message.get('longitude', 0.0),
-                "altitude": message.get('altitude', 0.0),
+                "latitude": telemetry_payload.get('latitude', 0.0),
+                "longitude": telemetry_payload.get('longitude', 0.0),
+                "altitude": telemetry_payload.get('altitude', 0.0),
                 "drone_name": message.get("drone_name", "Unknown"),
-                "gimbalAngle": message.get("gimbalAngle", "None"),
-                "heading": message.get("heading", "None")
+                "gimbalAngle": telemetry_payload.get("gimbalAngle", "None"),
+                "heading": telemetry_payload.get("heading", "None")
             }
         except (ValueError, TypeError) as e:
             dt.print_red(f"[KafkaHandler] Error updating metadata: {e}")
@@ -247,6 +258,13 @@ class KafkaHandler:
             polygon = self.get_polygon()
             no_flight_zones = self.get_no_flight_zones()
             
+            # Debug output
+            print(f"\n[CONSUMER] Checking drone position: ({lon:.6f}, {lat:.6f})")
+            print(f"[CONSUMER] Polygon available: {polygon is not None}")
+            if polygon:
+                print(f"[CONSUMER] Polygon bounds: {polygon.bounds}")
+                print(f"[CONSUMER] Drone in polygon: {polygon.contains(drone_point)}")
+            
             if not polygon:
                 dt.print_blue("[KafkaHandler] No polygon defined")
                 return False
@@ -257,11 +275,13 @@ class KafkaHandler:
                 return False
             
             # Check if drone is in any NFZ
-            for nfz in no_flight_zones:
+            for i, nfz in enumerate(no_flight_zones):
                 if nfz.contains(drone_point):
+                    print(f"[CONSUMER] Drone in NFZ {i+1}")
                     # dt.print_blue("[KafkaHandler] Drone is in no-flight zone")
                     return False
             
+            print(f"[CONSUMER] Drone is INSIDE polygon and not in NFZ - DETECTOR SHOULD TRIGGER!")
             return True
             
         except Exception as e:

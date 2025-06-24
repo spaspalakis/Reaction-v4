@@ -18,7 +18,7 @@ if the telemetry is outside the polygon or in a non-flight zone the detector jus
      2. KafkaHandler introduced for thread-safe Kafka operations
 
 --24/6 Change message structure: add obj_geolocation (Final version)
-
+--25/6 Drone is triggered correctly when enters the polygon
 """
 
 import os
@@ -83,14 +83,6 @@ def main():
     camera, img_size = user_input.check_user_input(args.use_cam, config["video_input_path"])
     
 
-    # Update config with frame dimensions
-    # config["frame_width"] = frame_width
-    # config["frame_height"] = frame_height
-    
-    # Save updated config
-    # with open("functions/config.json", "w") as config_file:
-    #     json.dump(config, config_file, indent=4)
-
     # Load model
     dt.print_green("\n-----\nModel is loading...")  
     time1_loadModel = time.time()
@@ -123,11 +115,12 @@ def main():
 
     try:
         while True:
+
             current_drone_data = kafka_handler.get_current_metadata() 
      
             # Update metadata before checking polygon
             detector.update_metadata(current_drone_data)
-                
+
             # Check if drone is in valid position
             if kafka_handler.is_drone_in_polygon():
                 logger.info("[Main] Drone is INSIDE the polygon. Starting detection...")
@@ -135,12 +128,6 @@ def main():
                 detector.run(img_size, config, camera, infer, args.save_frames,args.save_json)
             else:
                 logger.info("[Main] Drone is OUTSIDE the polygon or in a NFZ.")
-                # Skip frames by reading and discarding them
-                # ret, _ = camera.read()
-                # if not ret:
-                #     logger.warning("[Main] Video stream ended while outside polygon")
-                #     break
-                # time.sleep(0.1)  # Prevent busy waiting
                     
             time.sleep(0.1)  # Prevent busy waiting
     except KeyboardInterrupt:

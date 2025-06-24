@@ -57,7 +57,7 @@ class ObjectDetector:
 
 
 
-    def update_metadata(self, metadata):
+    def update_metadata(self, metadata): #May delete, where is uses?
         """
         Update the detector's metadata with new drone position and status.
         
@@ -128,12 +128,12 @@ class ObjectDetector:
             }
         
         fov = (68, 40)
-        telemetry = self.kafka_handler._latest_telemetry_message or {}
-        lat = self.kafka_handler.get_current_metadata()["latitude"] #telemetry.get("latitude", 0.0)
-        lon = self.kafka_handler.get_current_metadata()["longitude"] #telemetry.get("longitude", 0.0)
-        alt = self.kafka_handler.get_current_metadata()["altitude"] #telemetry.get("altitude", 0.0)
-        heading = self.kafka_handler.get_current_metadata()["heading"] #telemetry.get("heading", 0.0)
-        pitch =  self.kafka_handler.get_current_metadata()["gimbalAngle"] #telemetry.get("gimbalAngle", 0.0)
+        lat = self.kafka_handler.get_current_metadata()["latitude"] 
+        lon = self.kafka_handler.get_current_metadata()["longitude"] 
+        alt = self.kafka_handler.get_current_metadata()["altitude"] 
+        heading = self.kafka_handler.get_current_metadata()["heading"]
+        pitch =  self.kafka_handler.get_current_metadata()["gimbalAngle"] 
+        pitch+=90
 
         drone_info = (lat, lon, alt, heading, pitch)
         

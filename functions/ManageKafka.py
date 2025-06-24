@@ -193,7 +193,7 @@ class Consumer_UAV_Telemetry:
         self.conf = {
             'bootstrap.servers': broker,
             'security.protocol': 'PLAINTEXT',
-            'group.id': 'ode-v2-consumer',
+            'group.id': 'assaode-v2-consumer',
             'auto.offset.reset': 'latest'
         }
         self.topic_in = 'UAV_Telemetry'
