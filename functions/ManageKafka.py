@@ -8,6 +8,9 @@ from shapely.geometry import Polygon
 from confluent_kafka import Producer
 from confluent_kafka import Consumer
 from functions import display_tools as dt
+import uuid # Add this import
+from functions.logger import setup_logger
+logger = setup_logger()
 
 
 
@@ -117,7 +120,8 @@ class Consumer_PathPlanning:
         self.conf = {
             'bootstrap.servers': broker,
             'security.protocol': 'PLAINTEXT',
-            'group.id': 'reaction-consumer',
+            'group.id': f'1ode-v2-pp-consumer',
+            # 'enable_auto_commit' : True,
             'auto.offset.reset': 'latest'
         }
         self.topic_in = 'PathPlanning_Input'
@@ -134,18 +138,19 @@ class Consumer_PathPlanning:
         except Exception as e:
             print(f"[Consumer_PP] Error subscribing to topic: {e}")
 
-    def get_latest_message(self):
+    def get_latest_message_pp(self):
         """
         Get the latest message from the Kafka topic.
         Returns a dictionary with UAV status and drone ID, or None if no message is received.
         """
         try:
-            msg = self.consumer.poll(1.0)  # Poll for messages every second
+            msg = self.consumer.poll(0.5)  # Poll for messages every second
+            # print("🐍 File: functions/ManageKafka.py | Line: 146 | get_latest_message_pp ~ msg",msg)
 
             if msg is None:
                 return None
             if msg.error():
-                print(f"[Consumer_PP] Kafka error: {msg.error()}")
+                logger.info(f"[Consumer_PP] Kafka error: {msg.error()}")
                 return None
 
             try:
@@ -155,14 +160,16 @@ class Consumer_PathPlanning:
 
                 # Main polygon (first)
                 self.polygon = Polygon(geometries[0])
-                print("\n[Consumer_PP] Main polygon updated: ", self.polygon)
+                # print("\n[Consumer_PP] Main polygon updated: ", self.polygon)
+                logger.info("\n[Consumer_PP] Main polygon received")
 
                 # No-flight zones (all others)
                 self.no_flight_zones = []
                 for nfz_coords in geometries[1:]:
                     nfz_polygon = Polygon(nfz_coords)
                     self.no_flight_zones.append(nfz_polygon)
-                    print("\n[Consumer_PP] No-flight zone added:", nfz_polygon)
+                    # print("\n[Consumer_PP] No-flight zone added:", nfz_polygon)
+                    logger.info("[Consumer_PP] NFZ received")
 
                 return message
 
@@ -193,11 +200,12 @@ class Consumer_UAV_Telemetry:
         self.conf = {
             'bootstrap.servers': broker,
             'security.protocol': 'PLAINTEXT',
-            'group.id': 'assaode-v2-consumer',
+            'group.id': f'ode-v2-telemetry-consumer-{uuid.uuid4()}',
+            # 'enable.auto.commit': True,
             'auto.offset.reset': 'latest'
         }
         self.topic_in = 'UAV_Telemetry'
-        print(f"[Consumer_Telemetry] Initializing with broker: {broker}")
+        print(f"[Consumer_Telemetry] Broker Initialized | groud-id: {self.conf['group.id']}")
         self.consumer = Consumer(self.conf)
 
     def start(self):
@@ -209,7 +217,7 @@ class Consumer_UAV_Telemetry:
             print(f"[Consumer_Telemetry] Error subscribing to topic: {e}")
 
 
-    def get_latest_message(self):
+    def get_latest_message_telemetry(self):
         """
         Get the latest message from the UAV_Telemetry Kafka topic.
         Returns a dictionary with only the required fields and polygon check.
@@ -217,17 +225,24 @@ class Consumer_UAV_Telemetry:
 
         try:
             msg = self.consumer.poll(1.0)  # Poll for messages every second
+           
 
+            # print(f"\nmsg: {msg}")
             if msg is None:
                 return None
             if msg.error():
-                print(f"[Consumer_Telemetry] Kafka error: {msg.error()}")
+                logger.info(f"[Consumer_Telemetry] Kafka error: {msg.error()}")
                 return None
 
-            try:
-                message = json.loads(msg.value().decode('utf-8'))
-                telemetry = message.get("telemetry", {})
-                result = {
+            # try:
+            message = json.loads(msg.value().decode('utf-8'))
+            # print("\n🐍 ManageKafka.py | get_latest_message_telemetry ~ message",message)
+            
+            telemetry = message.get("telemetry", {})
+            if not telemetry:
+                print("[Consumer_Telemetry] Error: No telemetry in message")
+
+            result = {
                     "drone_name": message.get("drone_name", "unknown"),
                     "drone_id": message.get("drone_id", "unknown"),
                     "latitude": telemetry.get("latitude"),
@@ -235,20 +250,12 @@ class Consumer_UAV_Telemetry:
                     "altitude": telemetry.get("altitude"),
                     "uav_status": telemetry.get("droneState"),
                     "gimbalAngle": telemetry.get("gimbalAngle"),
-                    "heading": telemetry.get("heading")
+                    "heading": telemetry.get("heading"),
+                    'batteryPercentage': telemetry.get("batteryPercentage")
                 }
                 
-                return result
-
-            except json.JSONDecodeError as e:
-                print(f"[Consumer_Telemetry] Error decoding message: {e}")
-                return None
-            except KeyError as e:
-                print(f"[Consumer_Telemetry] Missing key in message: {e}")
-                return None
-            except Exception as e:
-                print(f"[Consumer_Telemetry] Error processing message: {e}")
-                return None
+            # dt.print_green(f"\n[ManageKafka] result: {result}")
+            return result
 
         except Exception as e:
             print(f"[Consumer_Telemetry] Error in get_latest_message: {e}")

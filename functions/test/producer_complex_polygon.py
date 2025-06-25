@@ -1,9 +1,11 @@
 import json
-import time
 import random
+import time
+import uuid
+
+import numpy as np
 from confluent_kafka import Producer
 from shapely.geometry import Point, Polygon
-import numpy as np
 
 KAFKA_BROKER = "apps.edutel.uniwa.gr:9092"
 TOPIC_PP = "PathPlanning_Input"
@@ -24,12 +26,7 @@ class ComplexPolygonProducer:
         # Extract main polygon and no-flight zone
         self.main_polygon = Polygon(self.mission_data['Geometries'][0]['geometry']['coordinates'][0])
         self.no_flight_zone = Polygon(self.mission_data['Geometries'][0]['geometry']['coordinates'][1])
-        # print(f"\n[DEBUG] Main polygon: {self.main_polygon}")
-        # print(f"[DEBUG] Main polygon bounds: {self.main_polygon.bounds}")
-        # print(f"[DEBUG] Main polygon coordinates: {list(self.main_polygon.exterior.coords)}")
-        # print(f"[DEBUG] NFZ: {self.no_flight_zone}")
-        # print(f"[DEBUG] NFZ bounds: {self.no_flight_zone.bounds}")
-        # print(f"[DEBUG] NFZ coordinates: {list(self.no_flight_zone.exterior.coords)}")
+
         
         # Define movement states with their durations (in seconds)
         self.states = {
@@ -60,12 +57,12 @@ class ComplexPolygonProducer:
         self.altitude = self.mission_data['properties']['altitude']
         
         # Print initial setup information
-        print("\nInitializing Complex Polygon Producer:")
-        print(f"Main polygon bounds: {self.main_polygon.bounds}")
-        print(f"No-flight zone bounds: {self.no_flight_zone.bounds}")
-        print(f"Mission ID: {self.mission_id}")
-        print(f"Altitude: {self.altitude}m")
-        print("\nState durations:")
+        # print("\nInitializing Complex Polygon Producer:")
+        # print(f"Main polygon bounds: {self.main_polygon.bounds}")
+        # print(f"No-flight zone bounds: {self.no_flight_zone.bounds}")
+        # print(f"Mission ID: {self.mission_id}")
+        # print(f"Altitude: {self.altitude}m")
+        # print("\nState durations:")
         for state, duration in self.states.items():
             print(f"- {state}: {duration} seconds ({self.points_per_state[state]} points)")
 
@@ -91,14 +88,14 @@ class ComplexPolygonProducer:
         )
         self.producer.flush()
         print("\nSent Path Planning message with polygon and no-flight zone data")
-        time.sleep(2)  # Wait for 2 seconds to ensure message is processed
+        time.sleep(10)  # Wait for 2 seconds to ensure message is processed
 
     def _generate_points_outside(self, num_points):
         """Generate points outside the main polygon"""
         bounds = self.main_polygon.bounds
         points = []
-        print(f"\n[DEBUG] Generating {num_points} points OUTSIDE polygon")
-        print(f"[DEBUG] Polygon bounds: {bounds}")
+        # print(f"\n[DEBUG] Generating {num_points} points OUTSIDE polygon")
+        # print(f"[DEBUG] Polygon bounds: {bounds}")
         
         # Generate points in a larger area around the polygon
         for i in range(num_points):
@@ -110,7 +107,7 @@ class ComplexPolygonProducer:
                 point = Point(x, y)
                 if not self.main_polygon.contains(point):
                     points.append((x, y))
-                    print(f"[DEBUG] Outside point {i+1}: ({x:.6f}, {y:.6f})")
+                    # print(f"[DEBUG] Outside point {i+1}: ({x:.6f}, {y:.6f})")
                     break
                 attempts += 1
             if attempts >= 100:
@@ -119,15 +116,15 @@ class ComplexPolygonProducer:
                 x = bounds[0] - 0.01
                 y = bounds[1] - 0.01
                 points.append((x, y))
-                print(f"[DEBUG] Fallback outside point {i+1}: ({x:.6f}, {y:.6f})")
+                # print(f"[DEBUG] Fallback outside point {i+1}: ({x:.6f}, {y:.6f})")
         return points
 
     def _generate_points_inside(self, num_points):
         """Generate points inside the main polygon but outside no-flight zone"""
         bounds = self.main_polygon.bounds
         points = []
-        print(f"\n[DEBUG] Generating {num_points} points INSIDE polygon")
-        print(f"[DEBUG] Polygon bounds: {bounds}")
+        # print(f"\n[DEBUG] Generating {num_points} points INSIDE polygon")
+        # print(f"[DEBUG] Polygon bounds: {bounds}")
         
         # Use more predictable coordinates for debugging
         center_x = (bounds[0] + bounds[2]) / 2
@@ -142,7 +139,7 @@ class ComplexPolygonProducer:
                 point = Point(x, y)
                 if self.main_polygon.contains(point) and not self.no_flight_zone.contains(point):
                     points.append((x, y))
-                    print(f"[DEBUG] Inside point {i+1}: ({x:.6f}, {y:.6f})")
+                    # print(f"[DEBUG] Inside point {i+1}: ({x:.6f}, {y:.6f})")
                     break
                 attempts += 1
             if attempts >= 100:
@@ -156,8 +153,8 @@ class ComplexPolygonProducer:
         """Generate points inside the no-flight zone"""
         bounds = self.no_flight_zone.bounds
         points = []
-        print(f"\n[DEBUG] Generating {num_points} points in NO-FLIGHT ZONE")
-        print(f"[DEBUG] NFZ bounds: {bounds}")
+        # print(f"\n[DEBUG] Generating {num_points} points in NO-FLIGHT ZONE")
+        # print(f"[DEBUG] NFZ bounds: {bounds}")
         
         for i in range(num_points):
             attempts = 0
@@ -167,7 +164,7 @@ class ComplexPolygonProducer:
                 point = Point(x, y)
                 if self.no_flight_zone.contains(point):
                     points.append((x, y))
-                    print(f"[DEBUG] NFZ point {i+1}: ({x:.6f}, {y:.6f})")
+                    # print(f"[DEBUG] NFZ point {i+1}: ({x:.6f}, {y:.6f})")
                     break
                 attempts += 1
             if attempts >= 100:
@@ -176,7 +173,7 @@ class ComplexPolygonProducer:
                 center_x = (bounds[0] + bounds[2]) / 2
                 center_y = (bounds[1] + bounds[3]) / 2
                 points.append((center_x, center_y))
-                print(f"[DEBUG] Fallback NFZ point {i+1}: ({center_x:.6f}, {center_y:.6f})")
+                # print(f"[DEBUG] Fallback NFZ point {i+1}: ({center_x:.6f}, {center_y:.6f})")
         return points
 
     def _get_location_status(self, point):
@@ -195,14 +192,15 @@ class ComplexPolygonProducer:
         
         # Create message in the correct format
         drone_name = "Test"
-        drone_id = 6666
+        drone_id = 666
         message = {
             "drone_name": drone_name,
             "drone_id": drone_id,
-            "timestamp": time.time(),
+            # "message_id": str(uuid.uuid4()), 
+            "iso_time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
             "telemetry": {
-                "latitude": latitude,
-                "longitude": longitude,
+                "latitude":  round(latitude, 8),
+                "longitude":  round(longitude, 8),
                 "altitude": self.altitude,
                 "heading": 97.44,
                 "velocity": 19.20062681907261,
@@ -257,19 +255,16 @@ class ComplexPolygonProducer:
         """Run the producer simulation"""
         print("\nStarting complex polygon producer simulation...")
         # First, send the path planning data
-        print("\nStep 1: Sending Path Planning data...")
+        # print("\nStep 1: Sending Path Planning data...")
         self.send_path_planning()
-        # Wait for 10 seconds to ensure path planning is processed
-        # print("Waiting 10 seconds for path planning to be processed...")
-        # time.sleep(10)
-        # Then start the drone movement simulation
-        print("\nStep 2: Starting drone movement simulation...")
-        print("Drone will follow this sequence:")
-        print("1. Start outside main polygon (10 seconds)")
-        print("2. Move inside main polygon (10 seconds)")
-        print("3. Enter no-flight zone (10 seconds)")
-        print("4. Return inside main polygon (10 seconds)")
-        print("5. Move outside again (10 seconds)\n")
+        # # Then start the drone movement simulation
+        # print("\nStep 2: Starting drone movement simulation...")
+        # print("Drone will follow this sequence:")
+        # print("1. Start outside main polygon (10 seconds)")
+        # print("2. Move inside main polygon (10 seconds)")
+        # print("3. Enter no-flight zone (10 seconds)")
+        # print("4. Return inside main polygon (10 seconds)")
+        # print("5. Move outside again (10 seconds)\n")
 
         self._detector_active = False
         prev_state = None
@@ -294,7 +289,7 @@ class ComplexPolygonProducer:
             longitude, latitude = points[self.current_point_index]
             self.send_drone_position(longitude, latitude)
             self.current_point_index += 1
-            time.sleep(2)  # Wait 2 seconds between messages
+            time.sleep(3)  # Wait 2 seconds between messages
 
         # Ensure detector is stopped at the end
         if self._detector_active:

@@ -5,7 +5,8 @@ import os, json
 app = Flask(__name__)
 
 # The directory where your frames are stored
-IMAGES_DIR = "/home/stavros/Documents/certh/projects/REACTION/codes/Reaction-v2/output/frames"
+IMAGES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'output', 'frames')
+
 
 
 @app.route('/images/<path:filename>')

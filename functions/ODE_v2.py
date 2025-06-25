@@ -253,9 +253,11 @@ class ObjectDetector:
                 ret, image = camera.read()
                 if not ret:
                     logger.warning("\n[ODE] Video Stream ended... Exiting!")
-                    break
+                    camera.release()
+                    logger.info("[ODE] Camera released")
+                    return False  # Indicate video ended
                 
-                dt.print_green(f"[ODE] fr: {fr_count}")
+                logger.info(f"[ODE] fr: {fr_count}")
               
                 # Check if drone is in polygon, if not skip frames
                 if not self.kafka_handler.is_drone_in_polygon():

@@ -5,6 +5,9 @@ from typing import Optional, Dict, Any
 from shapely.geometry import Point, Polygon
 from functions import display_tools as dt
 from functions.ManageKafka import Consumer_UAV_Telemetry, Consumer_PathPlanning, KafkaProducer, Message
+from functions.logger import setup_logger
+
+logger = setup_logger()
 
 class KafkaHandler:
     """
@@ -17,7 +20,7 @@ class KafkaHandler:
     This class uses separate threads to prevent Kafka operations from blocking
     the main detection loop.
     """
-    def __init__(self, broker: str, producer_topic: str, path_planning_topic: str,UAV_Telemetry_topic: str):
+    def __init__(self, broker: str, producer_topic: str, path_planning_topic: str, UAV_Telemetry_topic: str, selected_drone_id: int = 1,selected_drone_name: str = None):
         """
         Initialize the Kafka handler with configuration.
         
@@ -26,6 +29,7 @@ class KafkaHandler:
             producer_topic: Topic for sending detection messages
             command_control_topic: Topic for receiving command control messages
             path_planning_topic: Topic for receiving path planning messages
+            selected_drone_id: The drone ID to listen for in the telemetry topic
         """
         # Initialize Kafka clients with correct broker
         self.consumer_pp = Consumer_PathPlanning(broker=broker)
@@ -38,7 +42,6 @@ class KafkaHandler:
         
         # Queues for thread-safe communication between threads
         self.detection_queue = queue.Queue()  # Queue for detection messages to be sent
-        self.metadata_queue = queue.Queue()   # Queue for latest drone position and metadata
         
         # Thread control flags
         self.running = False
@@ -47,14 +50,13 @@ class KafkaHandler:
         self._latest_telemetry_message: Optional[Dict[str, Any]] = None
         self._pp_lock = threading.Lock()
         self._telemetry_lock = threading.Lock()
-        self._end_session = False
-        self._end_session_lock = threading.Lock()
+
         
         # Current state - stores latest metadata from CommandControl
         self.current_metadata = {
+            "batteryPercentage": "None",
             "uav_status": "down",
             "droneID": "None",
-            # "missionID": "None",
             "latitude": "0.00000000",
             "longitude": "0.00000000",
             "altitude": "0.00",
@@ -66,6 +68,10 @@ class KafkaHandler:
         # Thread instances
         self.consumer_thread = None
         self.sender_thread = None
+
+        # Store selected drone ID
+        self.selected_drone_id = selected_drone_id
+        self.selected_drone_name = selected_drone_name
 
     def start(self):
         """
@@ -110,50 +116,37 @@ class KafkaHandler:
         - Drone position
         - Polygon validation status
         """
-        dt.print_blue("\n[KafkaHandler] Starting consumer loop")
+        dt.print_yellow("\n[KafkaHandler] Starting consumer loop")
         while self.running:
             try:
                 # First check for path planning messages
-                pp_message = self.consumer_pp.get_latest_message()
+                pp_message = self.consumer_pp.get_latest_message_pp()
                 if pp_message:
-                    dt.print_blue("[KafkaHandler] Received new path planning message")
+                    # logger.info("[KafkaHandler] Received new path planning message")
                     with self._pp_lock:
                         self._latest_pp_message = pp_message
                 
-                # Then check command control messages
-                message_telemetry = self.consumer_telemetry.get_latest_message()
-                if message_telemetry:
-                    # Check for end of session signal
-                    if message_telemetry.get("end_session") is True:
-                        dt.print_red("[KafkaHandler] Received end_session signal.")
-                        with self._end_session_lock:
-                            self._end_session = True
-                        # The main loop in reaction_v2.py will handle stopping.
+                # Then check UAV Telemetry messages
+                message_telemetry = self.consumer_telemetry.get_latest_message_telemetry()
+                print("\n🐍 kafka_handler.py | _consumer_loop ~ message_telemetry",message_telemetry)
+                # print('\n')
+                # logger.info(f"[KafkaHanlder] message_telemetry: {message_telemetry}")
 
-                    with self._telemetry_lock:
-                        self._latest_telemetry_message = message_telemetry
+                if message_telemetry:
+                    if self.selected_drone_id is not None and message_telemetry.get("drone_id") != self.selected_drone_id:
+                        continue
+                    
+                    if self.selected_drone_name is not None and message_telemetry.get("drone_name") != self.selected_drone_name:
+                        continue
+
+                    # with self._telemetry_lock:
+                    #     self._latest_telemetry_message = message_telemetry
                     # dt.print_blue(f"[KafkaHandler] Received command control message: {message_cc}")
-                    self.last_message_time = time.time()
+                    # self.last_message_time = time.time()
+                    
                     self._update_metadata(message_telemetry)
                     
-                    # Check drone position
-                    try:
-                        telemetry_payload = message_telemetry.get("telemetry", {})
-                        lon = float(telemetry_payload.get("longitude", "0.0"))
-                        lat = float(telemetry_payload.get("latitude", "0.0"))
-                        drone_point = Point(lon, lat)
-                        
-                        # Update metadata queue with current state
-                        self.metadata_queue.put({
-                            "drone_point": drone_point,
-                            "metadata": self.current_metadata.copy()
-                        })
-                        # dt.print_blue(f"[KafkaHandler] Updated drone position: {drone_point}")
-                    except (ValueError, TypeError) as e:
-                        dt.print_red(f"[KafkaHandler] Error processing drone position: {e}")
-                
-                time.sleep(0.1)  # Prevent busy waiting
-                
+                     
             except Exception as e:
                 dt.print_red(f"[KafkaHandler] Error in consumer loop: {e}")
                 time.sleep(1)  # Wait before retrying
@@ -185,18 +178,21 @@ class KafkaHandler:
         Handles conversion and formatting of values.
         """
         try:
-            telemetry_payload = message.get("telemetry", {})
             self.current_metadata = {
-                "uav_status": message.get("uav_status", "down"),
-                "droneID": message.get("drone_id", "None"),
-                # "missionID": message.get("missionID", "None"),
-                "latitude": telemetry_payload.get('latitude', 0.0),
-                "longitude": telemetry_payload.get('longitude', 0.0),
-                "altitude": telemetry_payload.get('altitude', 0.0),
-                "drone_name": message.get("drone_name", "Unknown"),
-                "gimbalAngle": telemetry_payload.get("gimbalAngle", "None"),
-                "heading": telemetry_payload.get("heading", "None")
+                "drone_name": message.get("drone_name"),
+                "droneID": message.get("drone_id"),
+                "uav_status": message.get("uav_status"),
+                
+                "latitude": message.get('latitude'),
+                "longitude": message.get('longitude'),
+                "altitude": message.get('altitude'),
+                
+                "gimbalAngle": message.get("gimbalAngle"),
+                "heading": message.get("heading"),
+                "batteryPercentage": message.get("batteryPercentage", "None")
             }
+            print("\n🐍 kafka_handler | _update_metadata ~ current_metadata",self.current_metadata)
+                        
         except (ValueError, TypeError) as e:
             dt.print_red(f"[KafkaHandler] Error updating metadata: {e}")
 
@@ -212,6 +208,7 @@ class KafkaHandler:
         Get a copy of the current metadata.
         Used by ObjectDetector to include metadata in detection messages.
         """
+        
         return self.current_metadata.copy()
 
     def get_polygon(self) -> Optional[Polygon]:
@@ -253,35 +250,31 @@ class KafkaHandler:
             lon = float(self.current_metadata["longitude"])
             lat = float(self.current_metadata["latitude"])
             drone_point = Point(lon, lat)
+            # print("\n🐍 kafka_handler |is_drone_in_polygon ~ drone_point",drone_point)
             
+            # dt.print_red(f'[Handler-in polygon] drone_point: {drone_point}')
+
             # Get polygon and NFZs
             polygon = self.get_polygon()
             no_flight_zones = self.get_no_flight_zones()
-            
-            # Debug output
-            print(f"\n[CONSUMER] Checking drone position: ({lon:.6f}, {lat:.6f})")
-            print(f"[CONSUMER] Polygon available: {polygon is not None}")
-            if polygon:
-                print(f"[CONSUMER] Polygon bounds: {polygon.bounds}")
-                print(f"[CONSUMER] Drone in polygon: {polygon.contains(drone_point)}")
-            
+
+
             if not polygon:
                 dt.print_blue("[KafkaHandler] No polygon defined")
                 return False
             
             # Check if drone is in polygon
             if not polygon.contains(drone_point):
-                # dt.print_blue("[KafkaHandler] Drone is outside polygon")
+                # logger.info("[KafkaHandler] Drone is outside polygon")
                 return False
             
             # Check if drone is in any NFZ
             for i, nfz in enumerate(no_flight_zones):
                 if nfz.contains(drone_point):
-                    print(f"[CONSUMER] Drone in NFZ {i+1}")
+                    logger.info(f"[KafkaHandler] Drone in NFZ {i+1}")
                     # dt.print_blue("[KafkaHandler] Drone is in no-flight zone")
                     return False
             
-            print(f"[CONSUMER] Drone is INSIDE polygon and not in NFZ - DETECTOR SHOULD TRIGGER!")
             return True
             
         except Exception as e:

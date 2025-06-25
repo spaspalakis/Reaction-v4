@@ -16,13 +16,6 @@ else:
     # USE_HDMI = False  # True  #
 
 DETECTION_RATE = 5  # 2  #
-MISSION_ID = 1
-BATCH_FRAMES = 5
-USE_CPU = False  # True  #
-MODEL_INPUT_SIZE = 736 #416
-USE_HDMI = False
-
-
 
 def get_arguments():
     """Parse all the arguments provided from the CLI.
@@ -36,12 +29,6 @@ def get_arguments():
     parser.add_argument("--detection-rate", type=int, default=DETECTION_RATE,
                         help="The rate of detection, it perform 1 detection every detection-rate value. "
                              "Default: {}".format(DETECTION_RATE))
-
-    parser.add_argument("--mission-id", type=int, default=MISSION_ID, 
-                        help="The id of the mission assigned to the drone")
-        
-
-    ### ACTIONS
     
     parser.add_argument("--details", action="store_true",
                         help="Show details for the detected object")
@@ -58,6 +45,11 @@ def get_arguments():
     parser.add_argument("--save-json", action="store_true",
                         help="Save json into folder")
     
+    parser.add_argument("--drone-name", type=str, default=None,
+                    help="The drone name to listen for in the telemetry topic. If not set, all names are accepted.")
+    
+    parser.add_argument("--drone-id", type=int, default=1,
+                        help="The drone ID to listen for in the telemetry topic. Default: 1")
        
     return parser.parse_args()
 

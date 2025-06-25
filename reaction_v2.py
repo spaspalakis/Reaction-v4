@@ -6,6 +6,9 @@ The detector is triggered automatically when the telemetry of the drone is in th
 if the telemetry is outside the polygon or in a non-flight zone the detector just skipping the frames.
 
 
+--drone-id 5 
+--drone-name SIM_Alpha
+
 
 -31/3 OOP logic introduced
 -29/4 Sever logic introduced. Try to pass images over the internet and display them into the dashboard
@@ -19,6 +22,7 @@ if the telemetry is outside the polygon or in a non-flight zone the detector jus
 
 --24/6 Change message structure: add obj_geolocation (Final version)
 --25/6 Drone is triggered correctly when enters the polygon
+--26/6 Filter UAV telemetry use --drone-id or --drone-name
 """
 
 import os
@@ -49,6 +53,7 @@ from functions import user_input
 from functions import check_folder_paths
 from functions import ODE_v2
 from functions.kafka_handler import KafkaHandler
+logger = setup_logger()
 
 def main():
     """
@@ -84,7 +89,7 @@ def main():
     
 
     # Load model
-    dt.print_green("\n-----\nModel is loading...")  
+    logger.info("\n-----\nModel is loading...")  
     time1_loadModel = time.time()
     saved_model_loaded = tf.saved_model.load(config["model_path"], tags=[tag_constants.SERVING])
     infer = saved_model_loaded
@@ -99,7 +104,9 @@ def main():
         broker=config['broker'],
         producer_topic=config['producer_topic'],
         path_planning_topic=config['path_planning_topic'],
-        UAV_Telemetry_topic=config['UAV_Telemetry_topic']
+        UAV_Telemetry_topic=config['UAV_Telemetry_topic'],
+        selected_drone_id=args.drone_id,
+        selected_drone_name=args.drone_name
     )
     kafka_handler.start()
     
@@ -107,28 +114,33 @@ def main():
     detector = ODE_v2.ObjectDetector(config, kafka_handler)
 
     # Wait for initial path planning message
-    logger = setup_logger()
     logger.info("[Main] Waiting for initial path planning message...")
+    
     while not kafka_handler.get_latest_pp_message():
         time.sleep(1)
-    logger.info("[Main] Received initial path planning message")
+    logger.info("[Main] Received path planning message")
+    logger.info("[Main] Waiting telemetry message")
 
     try:
         while True:
 
             current_drone_data = kafka_handler.get_current_metadata() 
-     
+            # print(f'\n[Main]current_drone_data: current_drone_data: {current_drone_data}')
+
             # Update metadata before checking polygon
             detector.update_metadata(current_drone_data)
 
             # Check if drone is in valid position
             if kafka_handler.is_drone_in_polygon():
                 logger.info("[Main] Drone is INSIDE the polygon. Starting detection...")
+                
                 # Start detection loop
-                detector.run(img_size, config, camera, infer, args.save_frames,args.save_json)
-            else:
-                logger.info("[Main] Drone is OUTSIDE the polygon or in a NFZ.")
-                    
+                result = detector.run(img_size, config, camera, infer, args.save_frames,args.save_json)
+                
+                if result is False:
+                    logger.info("[Main] Video ended or camera released. Exiting main loop.")
+                    break
+
             time.sleep(0.1)  # Prevent busy waiting
     except KeyboardInterrupt:
          logger.info("[Main] Interrupted by user. Exiting...")

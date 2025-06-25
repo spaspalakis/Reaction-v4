@@ -24,7 +24,7 @@ def main():
     producer_config = {
         'bootstrap.servers': KAFKA_BROKER,
         'security.protocol': 'PLAINTEXT',
-        'client.id': 'colab-producer'
+        'client.id': 'producer-pp'
     }
 
     # Create a Kafka producer
