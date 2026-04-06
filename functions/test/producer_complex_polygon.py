@@ -56,13 +56,7 @@ class ComplexPolygonProducer:
         self.mission_id = self.mission_data['MissionId']
         self.altitude = self.mission_data['properties']['altitude']
         
-        # Print initial setup information
-        # print("\nInitializing Complex Polygon Producer:")
-        # print(f"Main polygon bounds: {self.main_polygon.bounds}")
-        # print(f"No-flight zone bounds: {self.no_flight_zone.bounds}")
-        # print(f"Mission ID: {self.mission_id}")
-        # print(f"Altitude: {self.altitude}m")
-        # print("\nState durations:")
+
         for state, duration in self.states.items():
             print(f"- {state}: {duration} seconds ({self.points_per_state[state]} points)")
 
@@ -88,7 +82,7 @@ class ComplexPolygonProducer:
         )
         self.producer.flush()
         print("\nSent Path Planning message with polygon and no-flight zone data")
-        time.sleep(10)  # Wait for 2 seconds to ensure message is processed
+        time.sleep(20)  # Wait for 2 seconds to ensure message is processed
 
     def _generate_points_outside(self, num_points):
         """Generate points outside the main polygon"""
@@ -191,13 +185,12 @@ class ComplexPolygonProducer:
         location_status = self._get_location_status(point)
         
         # Create message in the correct format
-        drone_name = "Test"
+        drone_name = "Test-com"
         drone_id = 666
         message = {
-            "drone_name": drone_name,
-            "drone_id": drone_id,
-            # "message_id": str(uuid.uuid4()), 
             "iso_time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            "drone_name": drone_name,
+            "drone_id": drone_id,           
             "telemetry": {
                 "latitude":  round(latitude, 8),
                 "longitude":  round(longitude, 8),
@@ -221,7 +214,8 @@ class ComplexPolygonProducer:
             value=json.dumps(message)
         )
         self.producer.flush()
-        print(f"\n[TELEMETRY] Drone Position: ({longitude:.8f}, {latitude:.8f})")
+        # print(f"\n[TELEMETRY] Drone Position: ({longitude:.8f}, {latitude:.8f})")
+        print(f"\n[TELEMETRY] time: {message['iso_time']}")
         # print(f"[TELEMETRY] Status: {location_status}")
         print(f"[TELEMETRY] State: {self.state_names[self.current_state]}")
         print(f"[TELEMETRY] Time remaining in state: {self.states[self.state_names[self.current_state]] - (self.current_point_index * 2)} seconds")
@@ -254,17 +248,8 @@ class ComplexPolygonProducer:
     def run(self):
         """Run the producer simulation"""
         print("\nStarting complex polygon producer simulation...")
-        # First, send the path planning data
-        # print("\nStep 1: Sending Path Planning data...")
+
         self.send_path_planning()
-        # # Then start the drone movement simulation
-        # print("\nStep 2: Starting drone movement simulation...")
-        # print("Drone will follow this sequence:")
-        # print("1. Start outside main polygon (10 seconds)")
-        # print("2. Move inside main polygon (10 seconds)")
-        # print("3. Enter no-flight zone (10 seconds)")
-        # print("4. Return inside main polygon (10 seconds)")
-        # print("5. Move outside again (10 seconds)\n")
 
         self._detector_active = False
         prev_state = None
@@ -289,7 +274,7 @@ class ComplexPolygonProducer:
             longitude, latitude = points[self.current_point_index]
             self.send_drone_position(longitude, latitude)
             self.current_point_index += 1
-            time.sleep(3)  # Wait 2 seconds between messages
+            time.sleep(1)  # Wait 2 seconds between messages
 
         # Ensure detector is stopped at the end
         if self._detector_active:

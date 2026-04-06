@@ -1,65 +1,71 @@
 import cv2 as cv
 import os
-# import device
+
+def _quiet_env():
+    return os.environ.get("REACTION_QUIET", "").lower() in ("1", "true", "yes")
 
 from functions import display_tools as dt
 
 
-def check_user_input(use_cam,rtsp_link):
+def check_user_input(input_mode, source_path):
+    q = _quiet_env()
 
-    # device_list = device.getDeviceList()
-    # dt.print_red(f"\ndevice_list: {device_list}")
-    
-    print(f'\nCheck user input:')
-    #### Check user input read VIDEO or CAMERA ####
-    if use_cam:
-        dt.print_green('Using HDMI input ..')
-        # camera = cv.VideoCapture("v4l2src device=/dev/video0 ! video/x-raw, format=YUY2 ! videoconvert ! appsink", cv.CAP_GSTREAMER)
-        camera = cv.VideoCapture("/dev/video0") 
-        # camera = cv.VideoCapture(2) # OBS stream
-        # camera = cv.VideoCapture("rtmp://127.0.0.1/live") # RTMP stream
+    if not q:
+        print(f'\nCheck user input:')
+    if input_mode == "usb":
+        if not q:
+            dt.print_green('Using USB camera input ..')
+        camera = cv.VideoCapture(source_path)
 
-
-        dt.print_green(f'Camera is open: {camera.isOpened()}')
+        if not q:
+            dt.print_green(f'Camera is open: {camera.isOpened()}')
         video_name = 'hdmi'
 
         fps = camera.get(cv.CAP_PROP_FPS)
         frame_height = int(camera.get(cv.CAP_PROP_FRAME_HEIGHT))
-        frame_width = int(camera.get(cv.CAP_PROP_FRAME_WIDTH))  
+        frame_width = int(camera.get(cv.CAP_PROP_FRAME_WIDTH))
         img_size = (frame_width, frame_height)
-        dt.print_green(f'\nFPS: {fps}\n(H,W): {frame_height,frame_width}')
-        
+        if not q:
+            dt.print_green(f'\nFPS: {fps}\n(H,W): {frame_height,frame_width}')
+
         if not camera.isOpened():
             dt.print_red('Camera not opened. Retrying...')
             for n in range(5):
-                # camera = cv.VideoCapture("v4l2src device=/dev/video0 ! video/x-raw, format=YUY2, width=1280, height=720, pixel-aspect-ratio=1/1, framerate=30/1 ! videoconvert ! appsink",cv.CAP_GSTREAMER)
-                camera = cv.VideoCapture("/dev/video0")
+                camera = cv.VideoCapture(source_path)
                 if camera.isOpened():
                     break
             else:
-                raise ValueError('Could not get HDMI input from Jetson after 5 attewpts. Aborting...')
+                raise ValueError('Could not get USB input after 5 attempts. Aborting...')
 
     else:
-        dt.print_green('Reading VIDEO from folder...')           
-        camera = cv.VideoCapture(rtsp_link)
+        if input_mode == "rtsp":
+            if not q:
+                dt.print_green('Reading RTSP stream...')
+        else:
+            if not q:
+                dt.print_green('Reading VIDEO from folder...')
+
+        camera = cv.VideoCapture(source_path)
         frame_width = int(camera.get(cv.CAP_PROP_FRAME_WIDTH))
         frame_height = int(camera.get(cv.CAP_PROP_FRAME_HEIGHT))
         img_size = (frame_width, frame_height)
 
         if not camera.isOpened():
-            print('Error: Could not open video file.')
+            print('Error: Could not open video/stream source.')
             exit()
         else:
-            print(f'Camera is open: {camera.isOpened()}')
-        
-        fps = camera.get(cv.CAP_PROP_FPS) # Get the frame rate of the video
-        print(f'Video file input: ./{rtsp_link} | FPS: {int(fps)} ')
-        dt.print_green(f'Video exists: {os.path.exists(rtsp_link)}\n')
-        
-        frame_count = int(camera.get(cv.CAP_PROP_FRAME_COUNT))  # Get the total number of frames in the vide
+            if not q:
+                print(f'Camera/stream is open: {camera.isOpened()}')
 
-        video_name = os.path.splitext(os.path.basename(rtsp_link))[0]
- 
+        fps = camera.get(cv.CAP_PROP_FPS)
+        if not q:
+            print(f'Input source: ./{source_path} | FPS: {int(fps)} ')
+        if input_mode == "video":
+            if not q:
+                dt.print_green(f'Video exists: {os.path.exists(source_path)}\n')
 
+        frame_count = int(camera.get(cv.CAP_PROP_FRAME_COUNT))
 
-    return camera,img_size
+        video_name = os.path.splitext(os.path.basename(source_path))[0] if input_mode == "video" else 'stream'
+
+    return camera, img_size

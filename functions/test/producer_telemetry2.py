@@ -1,10 +1,9 @@
 import json
 import time
 from confluent_kafka import Producer
-import random
 
 # Kafka settings
-KAFKA_BROKER = "10.147.0.1:9094"
+KAFKA_BROKER = "apps.edutel.uniwa.gr:9092"
 KAFKA_TOPIC = "UAV_Telemetry"
 
 def delivery_report(err, msg):
@@ -21,8 +20,8 @@ def main():
     }
     producer = Producer(producer_config)
 
-    drone_name = "Test_1"
-    drone_id = 666
+    drone_name = "Test_2"
+    drone_id = 555
     message_id_counter = 0  # Initialize the message ID counter
 
     count = 0
@@ -32,15 +31,15 @@ def main():
         #     end_session = True
         message = {
             # "message_id": message_id_counter,
-            "iso_time": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()),
+            "timestamp": time.time(),
             "drone_name": drone_name,
             "drone_id": drone_id,
             
             # "end_session": end_session,
             "telemetry": {
-                "latitude": round(random.uniform(37.95, 37.98), 8),
-                "longitude": round(random.uniform(23.72, 23.80), 8),
-                "altitude": 100,
+                "latitude": 37.9643345,
+                "longitude": 23.768096999999997,
+                "altitude": 129.94801330566406,
                 "heading": 97.44,
                 "velocity": 19.20062681907261,
                 "gpsSignal": 0,

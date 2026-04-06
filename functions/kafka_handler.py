@@ -33,7 +33,9 @@ class KafkaHandler:
         """
         # Initialize Kafka clients with correct broker
         self.consumer_pp = Consumer_PathPlanning(broker=broker)
-        self.consumer_telemetry = Consumer_UAV_Telemetry(broker=broker)
+        self.consumer_telemetry = Consumer_UAV_Telemetry(broker=broker,
+                                                         selected_drone_id=selected_drone_id,
+                                                         selected_drone_name=selected_drone_name)
         self.kafka_producer = KafkaProducer(broker, producer_topic)
         
         # Set topics
@@ -73,6 +75,10 @@ class KafkaHandler:
         self.selected_drone_id = selected_drone_id
         self.selected_drone_name = selected_drone_name
 
+        # Add frame counting attributes
+        self.frames_since_last_telemetry = 0
+        self.last_telemetry_time = time.time()
+
     def start(self):
         """
         Start the Kafka handler threads:
@@ -106,7 +112,8 @@ class KafkaHandler:
         self.consumer_telemetry.stop()
         self.consumer_pp.stop()
         
-        dt.print_green("[KafkaHandler] Stopped all threads")
+        if not __import__("os").environ.get("REACTION_QUIET", "").lower() in ("1", "true", "yes"):
+            dt.print_green("[KafkaHandler] Stopped all threads")
 
     def _consumer_loop(self):
         """
@@ -116,7 +123,9 @@ class KafkaHandler:
         - Drone position
         - Polygon validation status
         """
-        dt.print_yellow("\n[KafkaHandler] Starting consumer loop")
+        last_telemetry_time = time.time()
+        frames_since_last_telemetry = 0
+
         while self.running:
             try:
                 # First check for path planning messages
@@ -125,28 +134,57 @@ class KafkaHandler:
                     # logger.info("[KafkaHandler] Received new path planning message")
                     with self._pp_lock:
                         self._latest_pp_message = pp_message
-                
+                        # print("\n🐍 kafka_handler.py | _consumer_loop ~ self._latest_pp_message",self._latest_pp_message)
+                        
                 # Then check UAV Telemetry messages
+                # message_telemetry = self.consumer_telemetry.get_latest_message_telemetry()
+
+                # if message_telemetry is not None:   
+                #     print("\n🐍 kafka_handler.py | _consumer_loop ~ message_telemetry",message_telemetry)
+                #     self._update_metadata(message_telemetry)
+
+
                 message_telemetry = self.consumer_telemetry.get_latest_message_telemetry()
-                print("\n🐍 kafka_handler.py | _consumer_loop ~ message_telemetry",message_telemetry)
+                if message_telemetry is not None:
+                    with self._telemetry_lock:
+                        self._latest_telemetry_message = message_telemetry
+                else:
+                    continue
+
+
+
                 # print('\n')
                 # logger.info(f"[KafkaHanlder] message_telemetry: {message_telemetry}")
 
-                if message_telemetry:
-                    if self.selected_drone_id is not None and message_telemetry.get("drone_id") != self.selected_drone_id:
-                        continue
+                # if message_telemetry:
+                    # current_time = time.time()
+                    # time_since_last = current_time - last_telemetry_time
+                    # print('\n')
+                    # logger.info(f"[KafkaHandler] Telemetry received after {time_since_last:.2f}s")
+                    # logger.info(f"[KafkaHandler] Frames processed since last telemetry: {frames_since_last_telemetry}")
+
+                    # if time_since_last > 0:
+                        # fps_between_messages = frames_since_last_telemetry / time_since_last
+                        # logger.info(f"[KafkaHandler] FPS between telemetry messages: {fps_between_messages:.2f}")
+
+                    # if self.selected_drone_id is not None and message_telemetry.get("drone_id") != self.selected_drone_id:
+                    #     continue
                     
-                    if self.selected_drone_name is not None and message_telemetry.get("drone_name") != self.selected_drone_name:
-                        continue
+                    # if self.selected_drone_name is not None and message_telemetry.get("drone_name") != self.selected_drone_name:
+                    #     continue
 
                     # with self._telemetry_lock:
                     #     self._latest_telemetry_message = message_telemetry
                     # dt.print_blue(f"[KafkaHandler] Received command control message: {message_cc}")
                     # self.last_message_time = time.time()
+
                     
-                    self._update_metadata(message_telemetry)
-                    
-                     
+                    # last_telemetry_time = current_time
+                    # frames_since_last_telemetry = 0
+                
+                # Increment frame counter (this should be called from the detector)
+                # frames_since_last_telemetry += 1     
+
             except Exception as e:
                 dt.print_red(f"[KafkaHandler] Error in consumer loop: {e}")
                 time.sleep(1)  # Wait before retrying
@@ -157,7 +195,7 @@ class KafkaHandler:
         Main loop for sending Kafka messages.
         Processes detection messages from the queue and sends them to Kafka.
         """
-        dt.print_blue("[KafkaHandler] Starting sender loop")
+        
         while self.running:
             try:
                 # Get detection data from queue
@@ -191,7 +229,7 @@ class KafkaHandler:
                 "heading": message.get("heading"),
                 "batteryPercentage": message.get("batteryPercentage", "None")
             }
-            print("\n🐍 kafka_handler | _update_metadata ~ current_metadata",self.current_metadata)
+            # print("\n🐍 kafka_handler | _update_metadata ~ current_metadata",self.current_metadata)
                         
         except (ValueError, TypeError) as e:
             dt.print_red(f"[KafkaHandler] Error updating metadata: {e}")
@@ -202,6 +240,20 @@ class KafkaHandler:
         This is called by the ObjectDetector when new detections are available.
         """
         self.detection_queue.put(detection_data)
+
+    def send_end_session_signal(self):
+        """
+        Publish an ObjectDetection record with end_session=True.
+        Sent synchronously on the caller thread so it is not dropped if the sender thread stops soon after.
+        """
+        msg = self.get_latest_telemetry_message()
+        drone_id = msg.get("drone_id") if msg else self.selected_drone_id
+        drone_name = msg.get("drone_name") if msg else self.selected_drone_name
+        uav_status = None
+        if msg and isinstance(msg.get("telemetry"), dict):
+            uav_status = msg["telemetry"].get("droneState")
+        payload = Message.build_end_session_message(drone_id, drone_name, uav_status=uav_status)
+        self.kafka_producer.send_message(payload)
 
     def get_current_metadata(self) -> Dict[str, Any]:
         """
@@ -239,44 +291,58 @@ class KafkaHandler:
         with self._telemetry_lock:
             return  self._latest_telemetry_message
 
-    def is_drone_in_polygon(self) -> bool:
+    def is_drone_in_polygon(self,polygon_flag) -> bool:
         """
         Check if the drone is inside the polygon and not in any NFZ.
         This is the main validation method used by ObjectDetector to determine
         if detection should proceed.
         """
+        telemetry_msg = self.get_latest_telemetry_message()
+        # dt.print_green(f'\n[Handler-is_drone_inside] telemetry_msg: {telemetry_msg}'  )
+
+        telemetry = telemetry_msg.get("telemetry", {})
+        # dt.print_green(f'\n[Handler-is_drone_inside] telemetry: {telemetry}'  )
+
         try:
             # Get current drone position
-            lon = float(self.current_metadata["longitude"])
-            lat = float(self.current_metadata["latitude"])
+            lon = float(telemetry.get("longitude"))
+            lat = float(telemetry.get("latitude"))
+
             drone_point = Point(lon, lat)
-            # print("\n🐍 kafka_handler |is_drone_in_polygon ~ drone_point",drone_point)
             
-            # dt.print_red(f'[Handler-in polygon] drone_point: {drone_point}')
+            if polygon_flag:
+                # Get polygon and NFZs
+                polygon = self.get_polygon()
+                no_flight_zones = self.get_no_flight_zones()
 
-            # Get polygon and NFZs
-            polygon = self.get_polygon()
-            no_flight_zones = self.get_no_flight_zones()
-
-
-            if not polygon:
-                dt.print_blue("[KafkaHandler] No polygon defined")
-                return False
-            
-            # Check if drone is in polygon
-            if not polygon.contains(drone_point):
-                # logger.info("[KafkaHandler] Drone is outside polygon")
-                return False
-            
-            # Check if drone is in any NFZ
-            for i, nfz in enumerate(no_flight_zones):
-                if nfz.contains(drone_point):
-                    logger.info(f"[KafkaHandler] Drone in NFZ {i+1}")
-                    # dt.print_blue("[KafkaHandler] Drone is in no-flight zone")
+                
+                if not polygon:
+                    dt.print_blue("[KafkaHandler] No polygon defined")
                     return False
-            
+                
+                # Check if drone is in polygon
+                if not polygon.contains(drone_point):
+                    # logger.info("[KafkaHandler] Drone is outside polygon")
+                    return False
+                
+                # Check if drone is in any NFZ
+                for i, nfz in enumerate(no_flight_zones):
+                    if nfz.contains(drone_point):
+                        logger.info(f"[KafkaHandler] Drone in NFZ {i+1}")
+                        # dt.print_blue("[KafkaHandler] Drone is in no-flight zone")
+                        return False
+                
             return True
             
         except Exception as e:
             dt.print_red(f"[KafkaHandler] Error checking drone position: {e}")
             return False 
+        
+
+    def increment_frame_count(self):
+        """Called by ObjectDetector to track frames processed."""
+        if hasattr(self, 'frames_since_last_telemetry'):
+            self.frames_since_last_telemetry += 1
+        else:
+            # Fallback if attribute doesn't exist
+            self.frames_since_last_telemetry = 1

@@ -1,4 +1,5 @@
 import json
+import os
 from pprint import pprint
 from datetime import datetime
 import random
@@ -9,23 +10,28 @@ from confluent_kafka import Producer
 from confluent_kafka import Consumer
 from functions import display_tools as dt
 import uuid # Add this import
+
 from functions.logger import setup_logger
 logger = setup_logger()
 
 
 
 class Message:
-    def __init__(self, uav_status, droneID,drone_name, geolocation):
+    msg_counter = 1 
+
+    def __init__(self, droneID,drone_name,uav_status):       
+
         self.message = {
             "records": [
                 {
                     "value": {
                         "header": {
                             "topicName": "ObjectDetection",
-                            "msgIdentifier": str(random.randint(1000, 9999)),
+                            "msgIdentifier": str(Message.msg_counter), #str(random.randint(1000, 9999)),
                             "uav_status": uav_status,
                             "droneID": droneID,
                             "drone_name": drone_name,
+                            "end_session": False,
                             "sentUTC": datetime.utcnow().isoformat() + "Z",
                             "district": "Athens",
                             "body": {
@@ -36,7 +42,7 @@ class Message:
                 }
             ]
         }
-        # self.geolocation = geolocation
+        Message.msg_counter += 1 
         self.detection_map = {}
 
 
@@ -64,6 +70,22 @@ class Message:
     def to_json(self):
         return json.dumps(self.message, indent=4)
 
+    @staticmethod
+    def build_end_session_message(drone_id, drone_name, uav_status=None):
+        """Minimal ObjectDetection record signaling consumers that the OD session segment ended."""
+        mid = str(Message.msg_counter)
+        Message.msg_counter += 1
+        header = {
+            "topicName": "ObjectDetection",
+            "msgIdentifier": mid,
+            "droneID": drone_id,
+            "drone_name": drone_name,
+            "end_session": True,
+            "sentUTC": datetime.utcnow().isoformat() + "Z",
+        }
+        if uav_status is not None:
+            header["uav_status"] = uav_status
+        return {"records": [{"value": {"header": header}}]}
 
 
 class KafkaProducer:
@@ -106,12 +128,12 @@ class KafkaProducer:
             message = json.loads(message)  # Convert string to dictionary if necessary
 
         message = self.update_timestamp(message)
-
+        mid = message['records'][0]['value']['header']['msgIdentifier']
         message_bytes = json.dumps(message, indent=2).encode('utf-8')
         self.producer.produce(self.topic, message_bytes, key="key", callback=self.delivery_report)
         self.producer.poll(0)
         self.producer.flush()
-        print("Messages sent successfully!")
+        print(f"[Kafka] ObjectDetection message sent (msgIdentifier={mid})")
 
 
 
@@ -121,11 +143,10 @@ class Consumer_PathPlanning:
             'bootstrap.servers': broker,
             'security.protocol': 'PLAINTEXT',
             'group.id': f'1ode-v2-pp-consumer',
-            # 'enable_auto_commit' : True,
+            'enable.auto.commit' : True,
             'auto.offset.reset': 'latest'
         }
         self.topic_in = 'PathPlanning_Input'
-        print(f"\n[Consumer_PP] Initializing with broker: {broker}")
         self.consumer = Consumer(self.conf)
         self.polygon = None
         self.no_flight_zones = []
@@ -134,9 +155,8 @@ class Consumer_PathPlanning:
         """Initialize the Kafka consumer and subscribe to the topic."""
         try:
             self.consumer.subscribe([self.topic_in])
-            print(f"[Consumer_PP] Successfully subscribed to topic: {self.topic_in}")
         except Exception as e:
-            print(f"[Consumer_PP] Error subscribing to topic: {e}")
+            logger.error(f"[Consumer_PP] Failed to subscribe to topic {self.topic_in}: {e}")
 
     def get_latest_message_pp(self):
         """
@@ -161,7 +181,7 @@ class Consumer_PathPlanning:
                 # Main polygon (first)
                 self.polygon = Polygon(geometries[0])
                 # print("\n[Consumer_PP] Main polygon updated: ", self.polygon)
-                logger.info("\n[Consumer_PP] Main polygon received")
+                logger.info("[Consumer_PP] Main polygon received")
 
                 # No-flight zones (all others)
                 self.no_flight_zones = []
@@ -196,25 +216,27 @@ class Consumer_PathPlanning:
 
 
 class Consumer_UAV_Telemetry:
-    def __init__(self, broker='apps.edutel.uniwa.gr:9092'):
+    def __init__(self, broker='apps.edutel.uniwa.gr:9092',selected_drone_id=None, selected_drone_name=None):
         self.conf = {
             'bootstrap.servers': broker,
             'security.protocol': 'PLAINTEXT',
             'group.id': f'ode-v2-telemetry-consumer-{uuid.uuid4()}',
-            # 'enable.auto.commit': True,
+            'enable.auto.commit': True,
             'auto.offset.reset': 'latest'
         }
         self.topic_in = 'UAV_Telemetry'
-        print(f"[Consumer_Telemetry] Broker Initialized | groud-id: {self.conf['group.id']}")
         self.consumer = Consumer(self.conf)
+        self.selected_drone_id = selected_drone_id
+        self.selected_drone_name = selected_drone_name
+
+
 
     def start(self):
         """Initialize the Kafka consumer and subscribe to the topic."""
         try:
             self.consumer.subscribe([self.topic_in])
-            print(f"[Consumer_Telemetry] Successfully subscribed to topic: {self.topic_in}")
         except Exception as e:
-            print(f"[Consumer_Telemetry] Error subscribing to topic: {e}")
+            logger.error(f"[Consumer_Telemetry] Failed to subscribe to topic {self.topic_in}: {e}")
 
 
     def get_latest_message_telemetry(self):
@@ -238,24 +260,17 @@ class Consumer_UAV_Telemetry:
             message = json.loads(msg.value().decode('utf-8'))
             # print("\n🐍 ManageKafka.py | get_latest_message_telemetry ~ message",message)
             
-            telemetry = message.get("telemetry", {})
-            if not telemetry:
+            # telemetry = message.get("telemetry", {})
+            if not message:
                 print("[Consumer_Telemetry] Error: No telemetry in message")
 
-            result = {
-                    "drone_name": message.get("drone_name", "unknown"),
-                    "drone_id": message.get("drone_id", "unknown"),
-                    "latitude": telemetry.get("latitude"),
-                    "longitude": telemetry.get("longitude"),
-                    "altitude": telemetry.get("altitude"),
-                    "uav_status": telemetry.get("droneState"),
-                    "gimbalAngle": telemetry.get("gimbalAngle"),
-                    "heading": telemetry.get("heading"),
-                    'batteryPercentage': telemetry.get("batteryPercentage")
-                }
-                
+            if self.selected_drone_name is not None and message["drone_name"] != self.selected_drone_name:
+                return None
+            if self.selected_drone_id is not None and message["drone_id"] != self.selected_drone_id:
+                return None
+                            
             # dt.print_green(f"\n[ManageKafka] result: {result}")
-            return result
+            return message
 
         except Exception as e:
             print(f"[Consumer_Telemetry] Error in get_latest_message: {e}")

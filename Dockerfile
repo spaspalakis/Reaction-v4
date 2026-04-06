@@ -1,28 +1,31 @@
-FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu20.04
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
-# Install Python and dependencies
-RUN apt-get update && apt-get install -y \
-    python3.8 \
-    python3-pip \
-    python3.8-dev \
-    libgl1 \
-    libglib2.0-0 \
-    gcc \
-    build-essential \
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=Etc/UTC \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-dev python3-venv \
+    git wget curl ca-certificates \
+    libgl1 libglib2.0-0 \
+    build-essential gcc librdkafka-dev \
     && rm -rf /var/lib/apt/lists/*
-
-# Use python3.8 as default python
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1 && \
-    update-alternatives --install /usr/bin/pip pip /usr/bin/pip3 1
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements.txt ./requirements.txt
 
-RUN pip install --upgrade pip && \
-    pip install Cython numpy && \
-    pip install -r requirements.txt
+RUN python3 -m pip install --upgrade pip \
+    && python3 -m pip install -r requirements.txt
 
 COPY . .
 
-CMD ["python", "reaction_v2.py"]
+# NEW: build Cython extension for compute_overlap
+RUN python3 setup.py build_ext --inplace
+
+ENV PYTHONPATH=/app
+
+CMD ["python3", "reaction.py"]
+

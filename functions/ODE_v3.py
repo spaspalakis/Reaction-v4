@@ -1,6 +1,7 @@
 import os
 import cv2 as cv
 import time,json,requests
+import base64
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
@@ -8,6 +9,7 @@ from confluent_kafka import Producer
 from pprint import pprint
 from shapely.geometry import Point
 from collections import deque
+from datetime import datetime
 
 # Tracker and detection modules
 from deep_sort_utils.deep_sort_misc import create_box_encoder, Detection
@@ -28,7 +30,6 @@ from functions.internet_utils import get_external_ip
 from functions.kafka_handler import KafkaHandler
 from functions.logger import setup_logger   
 from functions.obj_geolocation import pixel_to_gps
-from functions.ngrok_service import get_ngrok_url
 
 logger = setup_logger()
 
@@ -51,88 +52,73 @@ class ObjectDetector:
         self.ip = get_external_ip()
         
         self.video_writer = None
+        self._video_writer_failed = False
         self.video_open = False
         self.frame_data = []
         self.detection_map = {}
+        self._current_frame_image = None
 
 
 
-    def update_metadata(self, metadata): #May delete, where is uses?
-        """
-        Update the detector's metadata with new drone position and status.
-        
-        Args:
-            metadata: Dictionary containing drone position and status information
-        """
-        self.kafka_handler.current_metadata.update({
-            "uav_status": metadata.get("uav_status", "down"),
-            "droneID": metadata.get("droneID", "None"),
-            # "missionID": metadata.get("missionID", "None"),
-            "latitude": metadata.get("latitude", "0.00000000"),
-            "longitude": metadata.get("longitude", "0.00000000"),
-            "altitude": metadata.get("altitude", "0.00"),
-            "drone_name": metadata.get("drone_name", "Unknown"),
-            "gimbalAngle": metadata.get("gimbalAngle", "None"),
-            "heading": metadata.get("heading", "None")
-        })
+    def emit_detection_batch(self, frame_id, telemetry_msg, save_json_local: bool):
+        """Build detection payload, publish to Kafka always; write JSON under json_folder only if save_json_local."""
+        json_path = os.path.join(self.config['json_folder'], f"reaction_msg_{frame_id:04d}.json")
 
+        telemetry = telemetry_msg.get("telemetry", {})
 
-    def save_json(self, batch_id):
-        """Save detection data to JSON and send to Kafka."""
-        json_path = os.path.join(self.config['json_folder'], f"reaction_batch_{batch_id}.json")
-        
-        # Create message object with current metadata
         message_obj = ManageKafka.Message(
-            uav_status=self.kafka_handler.get_current_metadata()["uav_status"],
-            droneID=self.kafka_handler.get_current_metadata()["droneID"],
-            # mission_id=self.kafka_handler.get_current_metadata()["missionID"],
-            drone_name=self.kafka_handler.get_current_metadata()["drone_name"],
-
-            geolocation={
-                "latitude": self.kafka_handler.get_current_metadata()["latitude"],
-                "longitude": self.kafka_handler.get_current_metadata()["longitude"],
-                "altitude": self.kafka_handler.get_current_metadata()["altitude"]
-            },
+            droneID=telemetry_msg.get("drone_id"),
+            drone_name=telemetry_msg.get("drone_name"),
+            uav_status=telemetry.get("droneState"),
         )
-        
-        # Add detections to the message
-        self.finalize_detections(message_obj)
-        
-        # Convert to JSON
-        message_json = message_obj.to_json()
-        
-        # Save locally
-        with open(json_path, "w") as f:
-            f.write(message_json)
-        # print(f"\nJSON file saved: {json_path}")
-        logger.info(f"JSON file saved: {json_path}")
+        if not __import__("os").environ.get("REACTION_QUIET", "").lower() in ("1", "true", "yes"):
+            print(f"\n[ODE] Created message at {datetime.utcnow().isoformat()}Z: msgIdentifier={message_obj.message['records'][0]['value']['header']['msgIdentifier']}")
 
-        # Add detected data to Kafka queue for sending
+        self.finalize_detections(message_obj)
+        message_json = message_obj.to_json()
+
+        if save_json_local:
+            with open(json_path, "w") as f:
+                f.write(message_json)
+            logger.info(f"[ODE] JSON file saved: {json_path}")
+
         self.kafka_handler.add_detection(message_json)
-        
-        # Reset detection map for next batch
         self.detection_map = {}
 
-    def add_detection(self,img_size, ip, frame_id, object_id, object_class, confidence, bbox):
+
+
+    def add_detection(self,img_size,telemetry_msg, ip, frame_id, object_id, object_class, confidence, bbox):
         """Store detection under the correct frameID."""
+        
+        telemetry = telemetry_msg.get("telemetry", {})
+        # dt.print_green(f'\n[ODE-add_detection] telemetry: {telemetry}'  )
+
+        lat = telemetry.get("latitude") 
+        lon = telemetry.get("longitude") 
+        alt = telemetry.get("altitude") 
+
         if frame_id not in self.detection_map:
+            image_b64 = ""
+            if self._current_frame_image is not None:
+                quality = self.config.get('image_jpeg_quality', 80)
+                _, buf = cv.imencode('.jpg', self._current_frame_image, [cv.IMWRITE_JPEG_QUALITY, quality])
+                image_b64 = base64.b64encode(buf).decode('utf-8')
+
             self.detection_map[frame_id] = {
                 "frameID": frame_id,
-                "imageURL": f"http://{ip}:8000/images/frame_{frame_id:04d}.jpg",
+                "imageData": image_b64,
                 "detections": [],
                 "GeoLocation": {
-                    "latitude": self.kafka_handler.get_current_metadata()["latitude"],
-                    "longitude": self.kafka_handler.get_current_metadata()["longitude"],
-                    "altitude": self.kafka_handler.get_current_metadata()["altitude"]
+                    "latitude": lat,
+                    "longitude": lon, 
+                    "altitude": alt 
                 }
             }
-        
         fov = (68, 40)
-        lat = self.kafka_handler.get_current_metadata()["latitude"] 
-        lon = self.kafka_handler.get_current_metadata()["longitude"] 
-        alt = self.kafka_handler.get_current_metadata()["altitude"] 
-        heading = self.kafka_handler.get_current_metadata()["heading"]
-        pitch =  self.kafka_handler.get_current_metadata()["gimbalAngle"] 
+
+
+        heading = telemetry.get("heading") 
+        pitch =  telemetry.get("gimbalAngle") 
         pitch+=90
 
         drone_info = (lat, lon, alt, heading, pitch)
@@ -155,7 +141,7 @@ class ObjectDetector:
         for frame_data in self.detection_map.values():
             message_obj.message["records"][0]["value"]["header"]["body"]["detection_list"].append(frame_data)
 
-    def process_frame(self, image, infer, frame_id, ip,img_size):
+    def process_frame(self, image, infer, frame_id, ip,img_size,telemetry_msg):
         """Process a single frame and return annotated image and detected tracks."""
 
         original_image = image.copy()
@@ -218,10 +204,12 @@ class ObjectDetector:
                         tracks=filtered_track_ids,
                         font_size=FONT_SIZE)
                 
+                self._current_frame_image = annot_img
+
                 for i in range(len(filtered_boxes)):
                     self.add_detection(
                         img_size, 
-
+                        telemetry_msg,
                         ip=ip,
                         frame_id=frame_id,
                         object_id=filtered_track_ids[i],
@@ -236,35 +224,79 @@ class ObjectDetector:
             return None
             
 
-    def run(self,img_size, config, camera, infer, save_frames,save_json):
+    def run(
+        self,
+        img_size,
+        config,
+        camera,
+        infer,
+        save_frames,
+        save_json,
+        polygon_flag,
+        save_video=False,
+    ):
         """Main detection loop."""
-
+        
+        # In the run() method, after processing each frame:
+        self.kafka_handler.increment_frame_count()
+        
         batches_sent = 0
         frame_times = []  # List to store processing times for each frame
-        start_time = time.time()
         fr_count = 0
         detections_count = 0
-        last_polygon_state = None  # Track the last known polygon state
+        fps_frame_count = 0
+        fps_start_time = time.time()
 
+        vid_fps = float(camera.get(cv.CAP_PROP_FPS) or 0.0)
+        if vid_fps <= 0.0 or np.isnan(vid_fps):
+            vid_fps = 25.0
+
+        video_out_path = None
+        if save_video:
+            video_out_path = os.path.join(
+                config["video_output_folder"],
+                config.get("video_output_filename", "output.mp4"),
+            )
+
+        was_in_detection_zone = False
         try:
             while camera.isOpened() and self.kafka_handler.running:
-                frame_start_time = time.time()  # Start timing this frame
                 
                 ret, image = camera.read()
                 if not ret:
                     logger.warning("\n[ODE] Video Stream ended... Exiting!")
+                    if was_in_detection_zone:
+                        self.kafka_handler.send_end_session_signal()
+                        was_in_detection_zone = False
                     camera.release()
                     logger.info("[ODE] Camera released")
                     return False  # Indicate video ended
                 
-                logger.info(f"[ODE] fr: {fr_count}")
-              
-                # Check if drone is in polygon, if not skip frames
-                if not self.kafka_handler.is_drone_in_polygon():
+                # # Update FPS counters
+                # fps_frame_count += 1
+                # current_time = time.time()
+                # if current_time - fps_start_time >= 1.0:  # Every second
+                #     fps = fps_frame_count / (current_time - fps_start_time)
+                #     logger.info(f"[ODE] FPS: {fps:.2f} (processed {fps_frame_count} frames in last second)")
+                #     fps_frame_count = 0
+                #     fps_start_time = current_time
+
+                # logger.info(f"[ODE] fr: {fr_count}")
+                
+                # If drone not in polygon skip frames (detection paused, not torn down)
+                in_zone = self.kafka_handler.is_drone_in_polygon(polygon_flag)
+                if was_in_detection_zone and not in_zone:
+                    self.kafka_handler.send_end_session_signal()
+                was_in_detection_zone = in_zone
+                if not in_zone:
+                    # dt.print_red('\n[ODE] Check inside polygon from ODE')
                     fr_count += 1
                     continue
                 
-                output_image = self.process_frame(image, infer, fr_count, self.ip,img_size)
+                telemetry_msg = self.kafka_handler.get_latest_telemetry_message()
+
+                current_frame_id = fr_count
+                output_image = self.process_frame(image, infer, current_frame_id, self.ip, img_size, telemetry_msg)
                 
                 # Skip if no detections
                 if output_image is None:
@@ -272,56 +304,52 @@ class ObjectDetector:
                     time.sleep(0.1)  # Prevent busy waiting
                     continue
                 
-                 
-                # # Calculate frame processing time
-                # frame_time = time.time() - frame_start_time
-                # frame_times.append(frame_time)
-                
                 fr_count += 1
                 detections_count += 1
                 
                 if detections_count % config['message_size'] == 0:
-                    if save_json:
+                    self.emit_detection_batch(current_frame_id, telemetry_msg, save_json)
+                    batches_sent += 1
+                    time.sleep(0.2)
 
-                        self.save_json(detections_count)
-                        batches_sent += 1
-                
                 if save_frames:
-                    im_path = f"{self.config['frames_folder']}/frame_{fr_count:04d}.jpg"
+                    im_path = f"{self.config['frames_folder']}/frame_{current_frame_id:04d}.jpg"
                     cv.imwrite(im_path, output_image)
-                
-            # # Print stats every 100 frames
-            # if len(frame_times) >= 100:
-            #     # Calculate average FPS over last 100 frames
-            #     avg_frame_time = sum(frame_times[-100:]) / 100
-            #     current_fps = 1.0 / avg_frame_time
-                
-            #     # Calculate overall FPS
-            #     total_time = time.time() - start_time
-            #     overall_fps = fr_count / total_time
-                
-            #     dt.print_magenta(f"\n[FPS Stats]")
-            #     dt.print_magenta(f"Current FPS (last 100 frames): {current_fps:.2f}")
-            #     dt.print_magenta(f"Overall FPS: {overall_fps:.2f}")
-            #     dt.print_magenta(f"Processed: {fr_count} total frames")
-            #     dt.print_magenta(f"Detections: {detections_count}")
-            #     dt.print_magenta(f"Batches sent: {batches_sent}")
-                
-            #     # Keep only last 100 frame times to save memory
-            #     frame_times = frame_times[-100:]
+
+                if save_video and video_out_path is not None:
+                    if self.video_writer is None and not self._video_writer_failed:
+                        h, w = output_image.shape[:2]
+                        fourcc = cv.VideoWriter_fourcc(*"mp4v")
+                        self.video_writer = cv.VideoWriter(
+                            video_out_path, fourcc, vid_fps, (w, h)
+                        )
+                        if not self.video_writer.isOpened():
+                            logger.error(
+                                f"[ODE] VideoWriter failed to open: {video_out_path}"
+                            )
+                            self.video_writer = None
+                            self._video_writer_failed = True
+                    if self.video_writer is not None:
+                        self.video_writer.write(output_image)
 
         except Exception as e:
             logger.error(f"[ODE] Error in detection loop: {str(e)}")
             raise
         finally:
-            # Cleanup
+            if was_in_detection_zone:
+                self.kafka_handler.send_end_session_signal()
+            if self.video_writer is not None:
+                self.video_writer.release()
+                self.video_writer = None
             camera.release()
             logger.info("[ODE] Camera released")
-        
+
         return True
+    
 
     def stop_detection(self):
         """Stop detection and clean up resources."""
+        self._video_writer_failed = False
         # Stop video writer if it's open
         if self.video_writer is not None:
             self.video_writer.release()

@@ -1,0 +1,33 @@
+sudo chown -R $USER:$USER output logs
+
+docker build -t reaction .
+
+
+docker run --rm \
+  --gpus all \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -u $(id -u):$(id -g) \
+  -v "$(pwd)/output:/app/output" \
+  -v "$(pwd)/logs:/app/logs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --video --save-frames --save-json
+
+
+
+### The key is -v "$(pwd):/app" — this mounts your entire project folder into /app inside the container, overriding the baked-in copy. No need for re-build
+
+
+docker run --rm -v "$(pwd):/host" reaction-v4 \
+  cp /app/compute_overlap.cpython-310-x86_64-linux-gnu.so /host/
+
+  
+  docker run --rm \
+  --gpus all \
+  -u $(id -u):$(id -g) \
+  -v "$(pwd):/app" \
+  -v "$(pwd)/output:/app/output" \
+  -v "$(pwd)/logs:/app/logs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --video --save-frames --save-json

@@ -1,21 +1,29 @@
 {
     "broker": "apps.edutel.uniwa.gr:9092",
+    "broker_vpn": "10.147.0.1:9094",
     "producer_topic": "ObjectDetection",
     "path_planning_topic": "PathPlanning_Input",
     "UAV_Telemetry_topic": "UAV_Telemetry",
+
     "batch_frame": 5,
     "score_thres": 0.5,
     "overlap_thres": 0.45,
     "max_cosine_distance": 0.2,
     "nn_budget": 100,
-    "model_path": "models/Reaction_v9i_736_small_b8_e300_tf",
-    "labels_path": "models/reaction.names",
+    
+    "model_path": "models/model-sea",
+    "labels_path": "models/reaction-sea.names",
     "encoder_path": "models/mars-small128.pb",
-    "model_input_size": 736,
+    "model_input_size": 640,
     "message_size": 1,
-    "video_input_path": "video_input/Basket.mp4",
+    "image_jpeg_quality": 80,
+    "usb_cam_device": "/dev/video0",
+    "video_input_path": "video_input/boat.mp4",
+    "rtsp_link": "rtsp://example.com/stream",
+    
     "frames_folder": "output/frames",
     "video_output_folder": "output/videos",
     "json_folder": "output/json_messages",
+    
     "GeoLocation": "longitude: None, latitude: None, altitude: None"
 }

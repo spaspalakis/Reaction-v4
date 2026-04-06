@@ -1,0 +1,169 @@
+# Running Reaction with Docker
+
+## Prerequisites
+
+- Docker installed on the host.
+- For **GPU** inference: NVIDIA driver on the host and **NVIDIA Container Toolkit** configured so `docker run --gpus all` works. Test with:
+ 
+  docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
+ 
+- **Kafka / telemetry**: The app waits for messages on the topics defined in `functions/config.json`. 
+For local tests, run producers from `functions/test/` (e.g. `producer_telemetry.py`).
+
+docker run --rm --network host \
+  --entrypoint python3 \
+  reaction-v4 \
+  functions/test/producer_telemetry.py
+
+  
+If Kafka is reachable only over **WireGuard**, bring the VPN up on the host before running the container.
+- **Video file**: By default the app reads `video_input_path` from config (paths are relative to `/app` inside the image). Mount your `video_input` folder if the video lives only on the host.
+
+## Build the image
+
+From the repository root (`Reaction-v4`):
+
+docker build -t reaction-v4 .
+
+The tag **`reaction-v4`** is only the Docker image name. The program you run inside the container is **`reaction.py`** (not `reaction_v3.py`). The image runs `reaction.py` by default via the Dockerfile `CMD`, installs Python dependencies, and builds the Cython extension `compute_overlap` during the build.
+
+## Run output layout (`--save-frames`, `--save-json`, `--save-video`)
+
+If you pass **any** of these flags, the app creates one folder per run:
+
+`output/runs/<dd.mm.yy:HH:MM:SS>/`
+
+Inside it (depending on flags):
+
+- `frames/` — JPEG frames when `--save-frames`
+- `video/` — annotated MP4 when `--save-video` (e.g. `<input_basename>.mp4`)
+- `json/` — detection JSON when `--save-json`
+- `reaction_<same-timestamp>.log` — file log for that run
+
+Mount `-v "$(pwd)/output:/app/output"` to see these on the host. If you run **without** any of the three save flags, behaviour is unchanged: file logs stay under `logs/<day.month.yy>/reaction_*.log` on the host (when you mount `logs`).
+
+## Why `docker run` uses `--entrypoint python3`
+
+The base image sets an NVIDIA entrypoint that does not accept leading `--` app arguments. Override the entrypoint and pass the script plus CLI flags explicitly:
+
+```bash
+--entrypoint python3 \
+reaction-v4 \
+reaction.py [OPTIONS...]
+```
+
+Optional: pass `-B` before the script so Python does not write `.pyc` when bind-mounting the project (everything after the image name is `python3` argv):
+
+```bash
+--entrypoint python3 \
+reaction-v4 \
+-B reaction.py --video --save-frames
+```
+
+## Typical: image-baked code (no source mount)
+
+Run from the project root so relative mounts match:
+
+```bash
+docker run --rm \
+  --gpus all \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd)/output:/app/output" \
+  -v "$(pwd)/logs:/app/logs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --video --save-frames --save-json
+```
+
+- **`output` / `logs`**: Writable on the host; use `-u "$(id -u):$(id -g)"` so files are not owned by root.
+- Add **`--vpn-kafka`** to use `broker_vpn` from `functions/config.json` instead of `broker`.
+
+### Mount local video (if not copied into the image)
+
+```bash
+-v "$(pwd)/video_input:/app/video_input" \
+```
+
+## Development: bind-mount the whole project
+
+When you mount `-v "$(pwd):/app"`, you **replace** the image's `/app` including the built `compute_overlap*.so`. Either:
+
+1. Copy the extension from the image once (after `docker build`):
+
+   ```bash
+   docker run --rm -v "$(pwd):/host" reaction-v4 \
+     sh -c 'cp /app/compute_overlap.cpython-*.so /host/ 2>/dev/null || true'
+   ```
+
+   (Adjust the glob if the exact `.so` name differs.)
+
+2. Or rebuild the extension on the host: `python3 setup.py build_ext --inplace` (needs compatible build env).
+
+Example dev run:
+
+```bash
+docker run --rm \
+  --gpus all \
+  -e NVIDIA_VISIBLE_DEVICES=all \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd):/app" \
+  -v "$(pwd)/output:/app/output" \
+  -v "$(pwd)/logs:/app/logs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  -B reaction.py --video --save-frames --save-json --vpn-kafka
+```
+
+### Kafka over VPN from the container
+
+The WireGuard interface is on the **host**. If the container cannot reach `10.147.0.1:9094`, try **host network mode** (Linux only):
+
+```bash
+docker run --rm \
+  --gpus all \
+  --network host \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd):/app" \
+  -v "$(pwd)/output:/app/output" \
+  -v "$(pwd)/logs:/app/logs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --video --vpn-kafka
+```
+
+## CPU-only (no GPU)
+
+Omit GPU flags:
+
+```bash
+docker run --rm \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd)/output:/app/output" \
+  -v "$(pwd)/logs:/app/logs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --video --save-frames --save-json
+```
+
+## Useful CLI flags (see functions/arguments.py)
+
+| Flag | Meaning |
+|------|--------|
+| --video | Use local file from video_input_path in config (default if no --usb-cam / --rtsp) |
+| --usb-cam | USB camera (usb_cam_device in config) |
+| --rtsp | RTSP URL (rtsp_link in config) |
+| --polygon | Wait for path planning; filter by polygon / NFZ |
+| --save-frames | JPEG frames under `output/runs/<ts>/frames/` (a run folder is created if any of save-frames / save-json / save-video is set) |
+| --save-video | Write annotated MP4 under `output/runs/<ts>/video/` |
+| --save-json | Write JSON under `output/runs/<ts>/json/`; Kafka still publishes whenever a batch is emitted |
+| --vpn-kafka | Use broker_vpn in functions/config.json |
+| --drone-id, --drone-name | Filter UAV telemetry |
+| --model land \| sea | Optional: preset for model_path, labels_path, model_input_size (else use config.json) |
+
+Configuration: edit functions/config.json (broker, topics, model paths, message_size, image_jpeg_quality, etc.).
+
+## Logs
+
+- **With** `--save-frames`, `--save-json`, or `--save-video`: the main log file is `output/runs/<ts>/reaction_<ts>.log` (mount `output` as above).
+- **Without** those flags: with `-v "$(pwd)/logs:/app/logs"`, logs are under `logs/<day.month.yy>/reaction_<timestamp>.log` on the host.

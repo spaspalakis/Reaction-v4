@@ -10,6 +10,13 @@
 /output/json_messages/*
 !/output/json_messages/.gitkeep
 
+# Ignore rendered videos under output/videos (keep placeholder)
+/output/videos/*
+!/output/videos/.gitkeep
+
+# Per-run bundles (frames / json / video / logs)
+/output/runs/
+
 # Ignore all videos in video_input except .gitkeep
 /video_input/*
 !/video_input/.gitkeep
@@ -17,3 +24,13 @@
 # Ignore all log files in logs except .gitkeep
 /logs/*
 !/logs/.gitkeep
+
+# Build / bytecode (do not commit)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+.env
