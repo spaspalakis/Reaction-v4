@@ -15,7 +15,8 @@
 !/output/videos/.gitkeep
 
 # Per-run bundles (frames / json / video / logs)
-/output/runs/
+/runs/*
+!/runs/.gitkeep
 
 # Ignore all videos in video_input except .gitkeep
 /video_input/*

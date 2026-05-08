@@ -7,6 +7,14 @@ def _quiet_env():
 from functions import display_tools as dt
 
 
+def _open_usb_camera(source_path):
+    if isinstance(source_path, str) and source_path.startswith("/dev/video"):
+        idx = source_path.replace("/dev/video", "", 1)
+        if idx.isdigit():
+            return cv.VideoCapture(int(idx), cv.CAP_V4L2)
+    return cv.VideoCapture(source_path)
+
+
 def check_user_input(input_mode, source_path):
     q = _quiet_env()
 
@@ -15,7 +23,7 @@ def check_user_input(input_mode, source_path):
     if input_mode == "usb":
         if not q:
             dt.print_green('Using USB camera input ..')
-        camera = cv.VideoCapture(source_path)
+        camera = _open_usb_camera(source_path)
 
         if not q:
             dt.print_green(f'Camera is open: {camera.isOpened()}')
@@ -31,7 +39,7 @@ def check_user_input(input_mode, source_path):
         if not camera.isOpened():
             dt.print_red('Camera not opened. Retrying...')
             for n in range(5):
-                camera = cv.VideoCapture(source_path)
+                camera = _open_usb_camera(source_path)
                 if camera.isOpened():
                     break
             else:
@@ -59,7 +67,10 @@ def check_user_input(input_mode, source_path):
 
         fps = camera.get(cv.CAP_PROP_FPS)
         if not q:
-            print(f'Input source: ./{source_path} | FPS: {int(fps)} ')
+            if input_mode == "video":
+                print(f'Input source: ./{source_path} | FPS: {int(fps)} ')
+            else:
+                print(f'Input source: {source_path} | FPS: {int(fps)} ')
         if input_mode == "video":
             if not q:
                 dt.print_green(f'Video exists: {os.path.exists(source_path)}\n')

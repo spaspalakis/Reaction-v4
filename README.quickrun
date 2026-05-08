@@ -1,0 +1,83 @@
+# Reaction Docker Quick Run
+
+Run everything from the project root (`Reaction-v4`).
+
+## Build image
+
+docker build -t reaction-v4 .
+
+## Prepare runs folder permissions (important)
+
+mkdir -p runs
+sudo chown -R "$(id -u):$(id -g)" runs
+
+## Optional: GPU check (only if host has NVIDIA runtime)
+
+docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
+
+     ------------------ (CPU-only, VPN/host networking) ------------------
+
+## 1) Video
+
+docker run --rm \
+  --network host \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd)/runs:/app/runs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --video --vpn-kafka
+
+##  2) USB camera /dev/video0
+
+docker run --rm \
+  --network host \
+  --device /dev/video0:/dev/video0 \
+  --group-add "$(getent group video | cut -d: -f3)" \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd)/runs:/app/runs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --usb-cam --vpn-kafka --model land
+
+
+## 3) Live Stream		
+
+docker run --rm \
+  --network host \
+  --device /dev/video0:/dev/video0 \
+  --group-add "$(getent group video | cut -d: -f3)" \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd)/runs:/app/runs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --rtsp --vpn-kafka --model land
+
+
+
+## 4) Run telemetry test producer
+
+docker run --rm --network host \
+  --entrypoint python3 \
+  reaction-v4 \
+  functions/test/producer_telemetry.py
+
+
+
+
+
+        --------------------- (With GPU, VPN/host networking) -----------------------------
+             
+             
+docker run --rm \
+  --gpus all \
+  --network host \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd):/app" \
+  -v "$(pwd)/runs:/app/runs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --vpn-kafka  
+  
+  
+             
+

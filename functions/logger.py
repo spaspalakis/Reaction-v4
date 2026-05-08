@@ -19,32 +19,18 @@ def is_quiet_terminal():
 
 
 def format_run_timestamp(dt: datetime) -> str:
-    """Run id folder/name: dd.mm.yy:HH:MM:SS (zero-padded)."""
+    """Run id folder/name: dd.mm.yy-HH:MM:SS (zero-padded)."""
     return (
-        f"{dt.day:02d}.{dt.month:02d}.{dt.year % 100:02d}:"
+        f"{dt.day:02d}.{dt.month:02d}.{dt.year % 100:02d}-"
         f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}"
     )
 
 
-def _format_date_time(dt: datetime) -> str:
-    """Format date-time as d.m.yy-H:M:S without leading zeros (e.g. 20.2.23-11:2:03)."""
-    return f"{dt.day}.{dt.month}.{dt.year % 100}-{dt.hour}:{dt.minute}:{dt.second}"
-
-
 def setup_logger():
-    """Set up logging configuration to write to both file and console.
+    """Set up logging configuration.
 
-    Logs are stored under `logs/<day.month.yy>/reaction_<date-time>.log`.
+    Console handler is attached here; file handler is attached per run via attach_run_log_file().
     """
-    base_logs_dir = "logs"
-    if not os.path.exists(base_logs_dir):
-        os.makedirs(base_logs_dir)
-
-    now = datetime.now()
-    day_folder_name = f"{now.day}.{now.month}.{now.year % 100}"
-    day_logs_dir = os.path.join(base_logs_dir, day_folder_name)
-    if not os.path.exists(day_logs_dir):
-        os.makedirs(day_logs_dir)
 
     logger = logging.getLogger("Reaction")
 
@@ -55,14 +41,6 @@ def setup_logger():
     logger.setLevel(logging.INFO)
 
     formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-
-    current_time_str = _format_date_time(now)
-    log_filename = os.path.join(day_logs_dir, f"reaction_{current_time_str}.log")
-    file_handler = logging.FileHandler(log_filename)
-    file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(formatter)
-
-    logger.addHandler(file_handler)
 
     if not is_quiet_terminal():
         console_handler = logging.StreamHandler()
@@ -75,8 +53,8 @@ def setup_logger():
 
 def attach_run_log_file(run_root: str, run_ts: str) -> str:
     """
-    Move file logging to run_root/reaction_<run_ts>.log.
-    Removes existing FileHandlers on the Reaction logger (e.g. default logs/ from setup_logger).
+    Attach file logging to run_root/reaction_<run_ts>.log.
+    Removes any existing FileHandlers on the Reaction logger.
     """
     os.makedirs(run_root, exist_ok=True)
 

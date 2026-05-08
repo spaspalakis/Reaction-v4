@@ -100,12 +100,13 @@ class KafkaProducer:
         }
         
         self.producer = Producer(self.producer_conf)
+        self.kafka_log_every_n_frames = 20
 
 
     def delivery_report(self,err, msg):
         """ Callback for message delivery reports. """
         if err is not None:
-            print(f"Message delivery failed: {err}")
+            logger.error(f"Message delivery failed: {err}")
         # else:
             # print(f"[Producer] Message delivered to {msg.topic()} [{msg.partition()}]")
 
@@ -128,12 +129,30 @@ class KafkaProducer:
             message = json.loads(message)  # Convert string to dictionary if necessary
 
         message = self.update_timestamp(message)
-        mid = message['records'][0]['value']['header']['msgIdentifier']
+        header = message['records'][0]['value']['header']
+        mid = header['msgIdentifier']
         message_bytes = json.dumps(message, indent=2).encode('utf-8')
         self.producer.produce(self.topic, message_bytes, key="key", callback=self.delivery_report)
         self.producer.poll(0)
         self.producer.flush()
-        print(f"[Kafka] ObjectDetection message sent (msgIdentifier={mid})")
+
+        # Keep terminal cleaner: print Kafka send status every N frames.
+        frame_ids = []
+        body = header.get("body", {})
+        detection_list = body.get("detection_list", []) if isinstance(body, dict) else []
+        for item in detection_list:
+            if isinstance(item, dict) and item.get("frameID") is not None:
+                try:
+                    frame_ids.append(int(item["frameID"]))
+                except (TypeError, ValueError):
+                    pass
+
+        if frame_ids:
+            max_frame_id = max(frame_ids)
+            if max_frame_id % self.kafka_log_every_n_frames == 0:
+                logger.info(f"[Kafka] Sent detection in frame {max_frame_id} (msgIdentifier={mid})")
+        elif header.get("end_session", False):
+            logger.info(f"[Kafka] End-session message sent (msgIdentifier={mid})")
 
 
 

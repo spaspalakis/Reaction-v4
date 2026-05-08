@@ -30,6 +30,7 @@ from functions.internet_utils import get_external_ip
 from functions.kafka_handler import KafkaHandler
 from functions.logger import setup_logger   
 from functions.obj_geolocation import pixel_to_gps
+from functions.stream_diagnostics import StreamDiagnostics
 
 logger = setup_logger()
 
@@ -71,7 +72,8 @@ class ObjectDetector:
             drone_name=telemetry_msg.get("drone_name"),
             uav_status=telemetry.get("droneState"),
         )
-        if not __import__("os").environ.get("REACTION_QUIET", "").lower() in ("1", "true", "yes"):
+        verbose_message_logs = bool(self.config.get("verbose_message_logs", False))
+        if verbose_message_logs and not __import__("os").environ.get("REACTION_QUIET", "").lower() in ("1", "true", "yes"):
             print(f"\n[ODE] Created message at {datetime.utcnow().isoformat()}Z: msgIdentifier={message_obj.message['records'][0]['value']['header']['msgIdentifier']}")
 
         self.finalize_detections(message_obj)
@@ -207,6 +209,12 @@ class ObjectDetector:
                 self._current_frame_image = annot_img
 
                 for i in range(len(filtered_boxes)):
+                    if self.config.get("verbose", False):
+                        print(
+                            "[Verbose] "
+                            f"frame={frame_id} track_id={filtered_track_ids[i]} "
+                            f"class={filtered_labels[i]} confidence={float(filtered_scores[i]):.3f}"
+                        )
                     self.add_detection(
                         img_size, 
                         telemetry_msg,
@@ -234,6 +242,8 @@ class ObjectDetector:
         save_json,
         polygon_flag,
         save_video=False,
+        source_path=None,
+        input_mode=None,
     ):
         """Main detection loop."""
         
@@ -244,12 +254,40 @@ class ObjectDetector:
         frame_times = []  # List to store processing times for each frame
         fr_count = 0
         detections_count = 0
+        total_detected_objects = 0
+        no_detection_streak = 0
+        no_detection_notice_every = int(
+            config.get(
+                "no_detection_periodic_message_every_frames",
+                config.get("no_detection_notice_every_frames", 100),
+            )
+        )
         fps_frame_count = 0
         fps_start_time = time.time()
 
         vid_fps = float(camera.get(cv.CAP_PROP_FPS) or 0.0)
         if vid_fps <= 0.0 or np.isnan(vid_fps):
             vid_fps = 25.0
+
+        max_consecutive_read_failures = int(config.get("max_read_failures", 30))
+        reconnect_retry_delay_s = float(config.get("stream_retry_delay_s", 0.5))
+        max_reopen_attempts = int(config.get("stream_reopen_attempts", 2))
+        consecutive_read_failures = 0
+        stream_stats_every_n_reads = int(
+            config.get("stream_test_periodic_message_every_reads", config.get("stream_stats_every_n_reads", 100))
+        )
+        stream_test_file = config.get("stream_test_file")
+        stream_test_enabled = bool(config.get("stream_test_enabled", False))
+
+        frame_count_hint = camera.get(cv.CAP_PROP_FRAME_COUNT)
+        is_likely_file = bool(frame_count_hint and frame_count_hint > 0 and np.isfinite(frame_count_hint))
+        is_stream_input = input_mode in ("rtsp", "usb") or not is_likely_file
+
+        stream_diag = StreamDiagnostics(
+            enabled=stream_test_enabled,
+            path=stream_test_file,
+            stats_every_n_reads=stream_stats_every_n_reads,
+        )
 
         video_out_path = None
         if save_video:
@@ -259,18 +297,72 @@ class ObjectDetector:
             )
 
         was_in_detection_zone = False
+        run_start_time = time.time()
+        stream_diag.start(source_path=source_path, input_mode=input_mode, stream_mode=is_stream_input)
         try:
             while camera.isOpened() and self.kafka_handler.running:
-                
+                stream_diag.read_attempt()
                 ret, image = camera.read()
                 if not ret:
+                    consecutive_read_failures += 1
+                    logger.warning(
+                        "[ODE] Frame read failed "
+                        f"(count={consecutive_read_failures}/{max_consecutive_read_failures}, "
+                        f"stream_mode={is_stream_input}, camera_open={camera.isOpened()})"
+                    )
+                    stream_diag.read_failure(
+                        frame_idx=fr_count,
+                        consecutive=consecutive_read_failures,
+                        max_consecutive=max_consecutive_read_failures,
+                    )
+
+                    # For file inputs, EOF is expected: exit promptly.
+                    if is_likely_file:
+                        logger.warning("[ODE] Video file reached end or frame read failed. Exiting detection loop.")
+                        stream_diag.file_end_or_fail()
+                        if was_in_detection_zone:
+                            self.kafka_handler.send_end_session_signal()
+                            was_in_detection_zone = False
+                        camera.release()
+                        logger.info("[ODE] Camera released")
+                        return False
+
+                    # For streams (RTSP/USB), tolerate transient decode/read failures.
+                    if is_stream_input and consecutive_read_failures < max_consecutive_read_failures:
+                        reopened = False
+                        if source_path:
+                            for attempt in range(1, max_reopen_attempts + 1):
+                                logger.warning(
+                                    f"[ODE] Reopen attempt {attempt}/{max_reopen_attempts} for source: {source_path}"
+                                )
+                                stream_diag.reopen_attempt(attempt=attempt, max_attempts=max_reopen_attempts)
+                                camera.release()
+                                time.sleep(reconnect_retry_delay_s)
+                                camera = cv.VideoCapture(source_path)
+                                if camera.isOpened():
+                                    reopened = True
+                                    logger.info("[ODE] Stream reopened successfully")
+                                    stream_diag.reopen_success()
+                                    break
+                        else:
+                            time.sleep(reconnect_retry_delay_s)
+
+                        if reopened or camera.isOpened():
+                            continue
+
                     logger.warning("\n[ODE] Video Stream ended... Exiting!")
+                    stream_diag.stream_end()
                     if was_in_detection_zone:
                         self.kafka_handler.send_end_session_signal()
                         was_in_detection_zone = False
                     camera.release()
                     logger.info("[ODE] Camera released")
                     return False  # Indicate video ended
+                else:
+                    if consecutive_read_failures > 0:
+                        logger.info(f"[ODE] Stream recovered after {consecutive_read_failures} read failures")
+                    stream_diag.read_success(recovered_after=consecutive_read_failures)
+                    consecutive_read_failures = 0
                 
                 # # Update FPS counters
                 # fps_frame_count += 1
@@ -300,12 +392,20 @@ class ObjectDetector:
                 
                 # Skip if no detections
                 if output_image is None:
+                    no_detection_streak += 1
+                    if no_detection_notice_every > 0 and no_detection_streak % no_detection_notice_every == 0:
+                        logger.info(
+                            f"[ODE] Running normally, no detections for {no_detection_streak} consecutive frames"
+                        )
                     fr_count += 1
                     time.sleep(0.1)  # Prevent busy waiting
                     continue
                 
                 fr_count += 1
                 detections_count += 1
+                if output_image is not None:
+                    total_detected_objects += len(self.detection_map.get(current_frame_id, {}).get("detections", []))
+                no_detection_streak = 0
                 
                 if detections_count % config['message_size'] == 0:
                     self.emit_detection_batch(current_frame_id, telemetry_msg, save_json)
@@ -336,6 +436,11 @@ class ObjectDetector:
             logger.error(f"[ODE] Error in detection loop: {str(e)}")
             raise
         finally:
+            total_runtime_sec = time.time() - run_start_time
+            stream_diag.end(
+                total_detected_objects=total_detected_objects,
+                total_runtime_sec=total_runtime_sec,
+            )
             if was_in_detection_zone:
                 self.kafka_handler.send_end_session_signal()
             if self.video_writer is not None:

@@ -1,14 +1,13 @@
-sudo chown -R $USER:$USER output logs
+sudo chown -R $USER:$USER runs
 
-docker build -t reaction .
+docker build -t reaction-v4 .
 
 
 docker run --rm \
   --gpus all \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -u $(id -u):$(id -g) \
-  -v "$(pwd)/output:/app/output" \
-  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
   reaction.py --video --save-frames --save-json
@@ -26,8 +25,18 @@ docker run --rm -v "$(pwd):/host" reaction-v4 \
   --gpus all \
   -u $(id -u):$(id -g) \
   -v "$(pwd):/app" \
-  -v "$(pwd)/output:/app/output" \
-  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
   reaction.py --video --save-frames --save-json
+  
+  
+  
+  
+--------
+Run test telemetry producer:
+
+docker run --rm --network host \
+  --entrypoint python3 \
+  reaction-v4 \
+  functions/test/producer_telemetry.py  

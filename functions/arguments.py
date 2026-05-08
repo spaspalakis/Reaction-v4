@@ -9,10 +9,6 @@ def _quiet_env():
     return os.environ.get("REACTION_QUIET", "").lower() in ("1", "true", "yes")
 
 
-release_info = platform.release()
-if not _quiet_env():
-    print('\nrelease_info: {}'.format(release_info))
-
 if 'tegra' in platform.release():
     if not _quiet_env():
         dt.print_green('\nInside Jetson platform')
@@ -48,17 +44,9 @@ def get_arguments():
       A list of parsed arguments.
     """
     parser = argparse.ArgumentParser(description="ODE Object detection")   
-
     
-    parser.add_argument("--detection-rate", type=int, default=DETECTION_RATE,
-                        help="The rate of detection, it perform 1 detection every detection-rate value. "
-                             "Default: {}".format(DETECTION_RATE))
-    
-    parser.add_argument("--details", action="store_true",
-                        help="Show details for the detected object")
-    
-    parser.add_argument("--usb-cam", action="store_true",
-                        help="Use USB camera input (e.g. /dev/video0)")
+    parser.add_argument("--usb-cam", nargs="?", const=True, default=None,
+                        help="Use USB camera input. Optional device path: --usb-cam /dev/video1 (default from config)")
     
     parser.add_argument("--video", action="store_true",
                         help="Use local video file defined in config.json")
@@ -66,14 +54,25 @@ def get_arguments():
     parser.add_argument("--rtsp", action="store_true",
                         help="Use RTSP stream link defined in config.json")
     
+
+
     parser.add_argument("--vpn-kafka", action="store_true",
                         help="Use Kafka broker over VPN (broker_vpn in config.json)")
     
     parser.add_argument("--quiet", action="store_true",
-                        help="Terminal: only prints from Kafka send path; full logs still written to logs/")
+                        help="Terminal: reduce non-essential prints; run logs still written under runs/<ts>/")
+
+    parser.add_argument("--verbose", action="store_true",
+                        help="Verbose terminal logs for detections (class/confidence/track ID)")
+
+    parser.add_argument("--test-stream", action="store_true",
+                        help="Enable per-run stream diagnostics file (runs/<ts>/test-stream)")
     
     parser.add_argument("--plot-frames", action="store_true",
                         help="Plot every detected frame. Default value is False")
+    
+    
+    
     
     parser.add_argument("--save-frames", action="store_true",
                         help="Write image into folder")
@@ -83,6 +82,9 @@ def get_arguments():
 
     parser.add_argument("--save-json", action="store_true",
                         help="Write detection JSON files under json_folder (Kafka is published whenever a batch is emitted, even without this flag)")
+    
+        
+
     
     parser.add_argument("--drone-name", type=str, default=None,
                     help="The drone name to listen for in the telemetry topic. If not set, all names are accepted.")
@@ -101,7 +103,7 @@ def get_arguments():
         help="Detection preset: land (736², models/model-land) or sea (640², models/model-sea). "
              "Sets model_path, labels_path, model_input_size. "
              "If omitted, those three come from config.json.",
-    )
+        )
 
     return parser.parse_args()
 

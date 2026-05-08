@@ -1,7 +1,7 @@
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
-    TZ=Etc/UTC \
+    TZ=Europe/Athens \
     PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
@@ -9,8 +9,11 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-pip python3-dev python3-venv \
     git wget curl ca-certificates \
+    tzdata \
     libgl1 libglib2.0-0 \
     build-essential gcc librdkafka-dev \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

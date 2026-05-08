@@ -29,18 +29,18 @@ The tag **`reaction-v4`** is only the Docker image name. The program you run ins
 
 ## Run output layout (`--save-frames`, `--save-json`, `--save-video`)
 
-If you pass **any** of these flags, the app creates one folder per run:
+The app creates one folder per run:
 
-`output/runs/<dd.mm.yy:HH:MM:SS>/`
+`runs/<dd.mm.yy-HH:MM:SS>/`
 
-Inside it (depending on flags):
+Inside it:
 
+- `reaction_<same-timestamp>.log` — file log for that run
 - `frames/` — JPEG frames when `--save-frames`
 - `video/` — annotated MP4 when `--save-video` (e.g. `<input_basename>.mp4`)
 - `json/` — detection JSON when `--save-json`
-- `reaction_<same-timestamp>.log` — file log for that run
 
-Mount `-v "$(pwd)/output:/app/output"` to see these on the host. If you run **without** any of the three save flags, behaviour is unchanged: file logs stay under `logs/<day.month.yy>/reaction_*.log` on the host (when you mount `logs`).
+Mount `-v "$(pwd)/runs:/app/runs"` to see these on the host.
 
 ## Why `docker run` uses `--entrypoint python3`
 
@@ -69,14 +69,13 @@ docker run --rm \
   --gpus all \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -u "$(id -u):$(id -g)" \
-  -v "$(pwd)/output:/app/output" \
-  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
   reaction.py --video --save-frames --save-json
 ```
 
-- **`output` / `logs`**: Writable on the host; use `-u "$(id -u):$(id -g)"` so files are not owned by root.
+- **`runs`**: Writable on the host; use `-u "$(id -u):$(id -g)"` so files are not owned by root.
 - Add **`--vpn-kafka`** to use `broker_vpn` from `functions/config.json` instead of `broker`.
 
 ### Mount local video (if not copied into the image)
@@ -108,8 +107,7 @@ docker run --rm \
   -e NVIDIA_VISIBLE_DEVICES=all \
   -u "$(id -u):$(id -g)" \
   -v "$(pwd):/app" \
-  -v "$(pwd)/output:/app/output" \
-  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
   -B reaction.py --video --save-frames --save-json --vpn-kafka
@@ -125,8 +123,7 @@ docker run --rm \
   --network host \
   -u "$(id -u):$(id -g)" \
   -v "$(pwd):/app" \
-  -v "$(pwd)/output:/app/output" \
-  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
   reaction.py --video --vpn-kafka
@@ -139,8 +136,7 @@ Omit GPU flags:
 ```bash
 docker run --rm \
   -u "$(id -u):$(id -g)" \
-  -v "$(pwd)/output:/app/output" \
-  -v "$(pwd)/logs:/app/logs" \
+  -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
   reaction.py --video --save-frames --save-json
@@ -154,9 +150,9 @@ docker run --rm \
 | --usb-cam | USB camera (usb_cam_device in config) |
 | --rtsp | RTSP URL (rtsp_link in config) |
 | --polygon | Wait for path planning; filter by polygon / NFZ |
-| --save-frames | JPEG frames under `output/runs/<ts>/frames/` (a run folder is created if any of save-frames / save-json / save-video is set) |
-| --save-video | Write annotated MP4 under `output/runs/<ts>/video/` |
-| --save-json | Write JSON under `output/runs/<ts>/json/`; Kafka still publishes whenever a batch is emitted |
+| --save-frames | JPEG frames under `runs/<ts>/frames/` |
+| --save-video | Write annotated MP4 under `runs/<ts>/video/` |
+| --save-json | Write JSON under `runs/<ts>/json/`; Kafka still publishes whenever a batch is emitted |
 | --vpn-kafka | Use broker_vpn in functions/config.json |
 | --drone-id, --drone-name | Filter UAV telemetry |
 | --model land \| sea | Optional: preset for model_path, labels_path, model_input_size (else use config.json) |
@@ -165,5 +161,4 @@ Configuration: edit functions/config.json (broker, topics, model paths, message_
 
 ## Logs
 
-- **With** `--save-frames`, `--save-json`, or `--save-video`: the main log file is `output/runs/<ts>/reaction_<ts>.log` (mount `output` as above).
-- **Without** those flags: with `-v "$(pwd)/logs:/app/logs"`, logs are under `logs/<day.month.yy>/reaction_<timestamp>.log` on the host.
+- The main log file is always `runs/<ts>/reaction_<ts>.log` (mount `runs` as above).

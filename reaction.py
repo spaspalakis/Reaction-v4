@@ -81,6 +81,7 @@ def main():
     # Load configuration
     with open("functions/config.json", "r") as config_file:
         config = json.load(config_file)
+    config["verbose"] = bool(args.verbose)
 
     if args.model:
         preset = arguments.MODEL_PRESETS[args.model]
@@ -89,9 +90,9 @@ def main():
         config["model_input_size"] = preset["model_input_size"]
 
     # Determine input source based on CLI arguments and config
-    if args.usb_cam:
+    if args.usb_cam is not None:
         input_mode = "usb"
-        source_path = config["usb_cam_device"]
+        source_path = args.usb_cam if isinstance(args.usb_cam, str) else config["usb_cam_device"]
         input_name = "usb-cam"
     elif args.rtsp:
         input_mode = "rtsp"
@@ -107,18 +108,18 @@ def main():
 
     now = _dt.now()
     run_ts = format_run_timestamp(now)
-    use_run_bundle = args.save_frames or args.save_json or args.save_video
-
-    if use_run_bundle:
-        run_root = os.path.join("output", "runs", run_ts)
-        attach_run_log_file(run_root, run_ts)
-        if args.save_frames:
-            config["frames_folder"] = os.path.join(run_root, "frames")
-        if args.save_json:
-            config["json_folder"] = os.path.join(run_root, "json")
-        if args.save_video:
-            config["video_output_folder"] = os.path.join(run_root, "video")
-            config["video_output_filename"] = f"{input_name}.mp4"
+    run_root = os.path.join("runs", run_ts)
+    attach_run_log_file(run_root, run_ts)
+    config["stream_test_enabled"] = bool(args.test_stream)
+    if args.test_stream:
+        config["stream_test_file"] = os.path.join(run_root, "test-stream")
+    if args.save_frames:
+        config["frames_folder"] = os.path.join(run_root, "frames")
+    if args.save_json:
+        config["json_folder"] = os.path.join(run_root, "json")
+    if args.save_video:
+        config["video_output_folder"] = os.path.join(run_root, "video")
+        config["video_output_filename"] = f"{input_name}.mp4"
 
     if args.model:
         logger.info(
@@ -219,6 +220,8 @@ def main():
                     args.save_json,
                     args.polygon,
                     save_video=args.save_video,
+                    source_path=source_path,
+                    input_mode=input_mode,
                 )
                 
                 if result is False:
