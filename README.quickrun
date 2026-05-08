@@ -15,6 +15,12 @@ sudo chown -R "$(id -u):$(id -g)" runs
 
 docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
 
+
+## Problem with compute overlap
+
+   docker run --rm -v "$(pwd):/host" reaction-v4 \
+     sh -c 'cp /app/compute_overlap.cpython-*.so /host/ 2>/dev/null || true'
+
      ------------------ (CPU-only, VPN/host networking) ------------------
 
 ## 1) Video
