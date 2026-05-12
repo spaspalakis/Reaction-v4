@@ -398,7 +398,6 @@ class ObjectDetector:
                             f"[ODE] Running normally, no detections for {no_detection_streak} consecutive frames"
                         )
                     fr_count += 1
-                    time.sleep(0.1)  # Prevent busy waiting
                     continue
                 
                 fr_count += 1
@@ -410,7 +409,6 @@ class ObjectDetector:
                 if detections_count % config['message_size'] == 0:
                     self.emit_detection_batch(current_frame_id, telemetry_msg, save_json)
                     batches_sent += 1
-                    time.sleep(0.2)
 
                 if save_frames:
                     im_path = f"{self.config['frames_folder']}/frame_{current_frame_id:04d}.jpg"

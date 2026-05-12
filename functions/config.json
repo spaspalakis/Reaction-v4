@@ -21,7 +21,7 @@
     "image_jpeg_quality": 80,
     "usb_cam_device": "/dev/video0",
     "video_input_path": "video_input/boat.mp4",
-    "rtsp_link": "rtsp://aiders:abcd1234@10.147.0.30:8554/live/SIM_Alpha",
+    "rtsp_link": "rtsp://aiders:abcd1234@10.147.0.30:8554/live/SIM_Bravo",
     
     "frames_folder": "output/frames",
     "video_output_folder": "output/videos",

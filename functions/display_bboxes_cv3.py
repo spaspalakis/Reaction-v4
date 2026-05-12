@@ -1,9 +1,45 @@
 import os
 import cv2 as cv
 import numpy as np
-from matplotlib import pyplot as plt
 
 THICKNESS = 2  # Line thickness for bounding boxes
+
+# BGR. Keys must be lowercase (labels are matched with .strip().lower()).
+_COLOR_MAP = {
+    "boat": (197, 176, 213),
+    "car": (255, 243, 126),
+    "human": (59, 21, 185),
+    # reaction-sea.names (land uses boat; sea uses sailboat/skiff/cruiseboat)
+    "sailboat": (80, 180, 255),
+    "skiff": (60, 220, 120),
+    "cruiseboat": (180, 120, 255),
+}
+
+# Distinct fallback colors (avoid near-black so outlines stay visible).
+_FALLBACK_BGR = [
+    (0, 255, 255),
+    (255, 128, 0),
+    (255, 0, 255),
+    (0, 165, 255),
+    (147, 20, 255),
+    (255, 191, 0),
+]
+
+
+def _color_for_class_label(label):
+    key = (label or "").strip().lower()
+    if key in _COLOR_MAP:
+        return _COLOR_MAP[key]
+    h = sum(ord(c) for c in key) if key else 0
+    return _FALLBACK_BGR[h % len(_FALLBACK_BGR)]
+
+
+def _text_bgr_for_background(bg_bgr):
+    """Black or white text for readability on the label background."""
+    b, g, r = bg_bgr
+    luminance = 0.114 * b + 0.587 * g + 0.299 * r
+    return (0, 0, 0) if luminance > 165 else (255, 255, 255)
+
 
 def display_bboxes(image_source, bboxes, labels=None, scores=None, tracks=None, title=None, font_size=None):
     """
@@ -60,20 +96,11 @@ def display_bboxes(image_source, bboxes, labels=None, scores=None, tracks=None, 
        # Convert bboxes to a numpy array if it isn't one already
     # bboxes = np.array(bboxes)
 
-    # Define specific colors for each of the 6 classes
-    color_map = {
-        "boat": (197, 176,213 ),   #  dark pink            ok 
-        "car": (255, 243, 126) ,     #  light blue          ok
-        "human": (59,21,185),    # dark red                ok
-    }
-
-
-
     for i in range(bboxes.shape[0]):
     # for i in range(len(bboxes)):
 
         label = labels[i]
-        color = color_map.get(label, (0, 0, 0))  # Default to black if label not in color_map
+        color = _color_for_class_label(label)
         
         if display_labels:
             if display_scores:
@@ -157,5 +184,6 @@ def draw_bounding_box_on_image(image, ymin, xmin, ymax, xmax, color=(0, 255, 0),
 
             # (text_x, text_y) = (left, top - text_height - 2 * margin)
             cv.rectangle(image, (text_x, text_y), (text_x + text_width, text_y + text_height + margin), color, cv.FILLED)
+            text_color = _text_bgr_for_background(color)
             cv.putText(image, display_str, (text_x + margin, text_y + text_height - margin), cv.FONT_HERSHEY_SIMPLEX,
-                       font_size / 24, (0, 0, 0), 1)
+                       font_size / 24, text_color, 1)

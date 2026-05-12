@@ -4,7 +4,18 @@ from typing import List, Optional
 
 
 class StreamDiagnostics:
-    """Collect and persist stream read/reconnect diagnostics for one run."""
+    """Collect and persist stream read/reconnect diagnostics for one run.
+
+    Metrics (see [END] line):
+    - read_attempts: how many times the main loop called ``camera.read()`` (each loop = one attempt).
+    - reads_ok: ``read()`` returned success (``ret`` true); same as total_frames_read.
+    - reads_failed: number of failed ``read()`` calls (each failure is one event).
+    - reopen_attempts: how many times we logged a stream reopen try (can be >1 if multiple reconnect cycles).
+    - failed_at_logical_frame_idx: ``fr_count`` from ODE at each failure (logical frame counter when the
+      bad read happened; not necessarily the container's frame number).
+    - avg_read_fps: reads_ok / wall-clock seconds for the whole run (includes waits, Kafka, model, etc.).
+    - total_runtime_min: wall time from [START] to [END] in minutes.
+    """
 
     def __init__(self, enabled: bool, path: Optional[str], stats_every_n_reads: int = 100):
         self.enabled = enabled and bool(path)
@@ -39,8 +50,8 @@ class StreamDiagnostics:
         self.failed_read_indexes.append(frame_idx)
         self._write(
             "[READ_FAIL] "
-            f"frame_idx={frame_idx} attempt_idx={self.total_read_attempts} "
-            f"consecutive={consecutive}/{max_consecutive}"
+            f"logical_frame_idx={frame_idx} read_attempt_number={self.total_read_attempts} "
+            f"consecutive_bad_reads={consecutive}/{max_consecutive}"
         )
 
     def reopen_attempt(self, attempt: int, max_attempts: int):
@@ -66,11 +77,13 @@ class StreamDiagnostics:
 
     def end(self, total_detected_objects: int = 0, total_runtime_sec: float = 0.0):
         avg_read_fps = (self.total_read_success / total_runtime_sec) if total_runtime_sec > 0 else 0.0
+        total_runtime_min = float(total_runtime_sec) / 60.0 if total_runtime_sec > 0 else 0.0
         self._write(
             "[END] "
-            f"attempts={self.total_read_attempts} success={self.total_read_success} "
-            f"fails={self.total_read_failures} reopen_attempts={self.total_reopen_attempts} "
-            f"fail_frame_indices={self.failed_read_indexes} "
+            f"read_attempts={self.total_read_attempts} reads_ok={self.total_read_success} "
+            f"reads_failed={self.total_read_failures} reopen_attempts={self.total_reopen_attempts} "
+            f"failed_at_logical_frame_idx={self.failed_read_indexes} "
             f"avg_read_fps={avg_read_fps:.2f} total_frames_read={self.total_read_success} "
-            f"total_detected_objects={int(total_detected_objects)} total_runtime_sec={float(total_runtime_sec):.2f}"
+            f"total_detected_objects={int(total_detected_objects)} "
+            f"total_runtime_min={total_runtime_min:.2f}"
         )

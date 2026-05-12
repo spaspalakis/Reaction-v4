@@ -2,6 +2,10 @@ sudo chown -R $USER:$USER runs
 
 docker build -t reaction-v4 .
 
+# GPU inside container (needs NVIDIA driver on host + nvidia-container-toolkit):
+#   docker run --rm --gpus all reaction-v4 nvidia-smi
+# If this fails, fix the host toolkit; --gpus all on run is correct for TensorFlow GPU.
+
 
 docker run --rm \
   --gpus all \
