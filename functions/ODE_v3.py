@@ -102,6 +102,32 @@ class ObjectDetector:
             print("\n")
         logger.info(f"[ODE] frame {frame_id} | {infer_part} | {kafka_part}")
 
+    def _log_run_summary(
+        self,
+        total_runtime_sec,
+        total_frames_read,
+        total_frames_inferred,
+        detection_frames,
+        kafka_batches,
+        total_objects,
+    ):
+        if total_runtime_sec <= 0:
+            return
+        read_fps = total_frames_read / total_runtime_sec
+        infer_fps = total_frames_inferred / total_runtime_sec
+        runtime_min = total_runtime_sec / 60.0
+        msg = (
+            f"[ODE] run summary | runtime {runtime_min:.1f} min | "
+            f"read {total_frames_read} frames ({read_fps:.1f}/s) | "
+            f"infer {total_frames_inferred} frames ({infer_fps:.1f}/s) | "
+            f"detection frames {detection_frames} | "
+            f"kafka sent {kafka_batches} | objects {total_objects}"
+        )
+        if not is_quiet_terminal():
+            print("\n")
+            dt.print_green(msg)
+        logger.info(msg)
+
     @staticmethod
     def _detection_rate_settings(config, vid_fps, is_stream_input):
         detection_fps = float(config.get("detection_fps") or 0)
@@ -491,6 +517,8 @@ class ObjectDetector:
         last_processed_at = 0.0
         frames_read = 0
         frames_processed = 0
+        total_run_frames_read = 0
+        total_run_frames_inferred = 0
         rate_log_start = time.time()
 
         try:
@@ -570,16 +598,20 @@ class ObjectDetector:
                     consecutive_read_failures = 0
 
                 frames_read += 1
+                total_run_frames_read += 1
                 if rate_log_interval > 0:
                     now = time.time()
                     elapsed = now - rate_log_start
                     if elapsed >= rate_log_interval:
-                        if not is_quiet_terminal():
-                            print("\n")
-                        logger.info(
+                        msg = (
                             f"[ODE] throughput {frames_processed / elapsed:.1f} infer/s "
                             f"({frames_read / elapsed:.1f} read/s)"
                         )
+                        if not is_quiet_terminal():
+                            print("\n")
+                            dt.print_green(msg)
+                        else:
+                            logger.info(msg)
                         frames_read = 0
                         frames_processed = 0
                         rate_log_start = now
@@ -593,6 +625,7 @@ class ObjectDetector:
                     continue
 
                 frames_processed += 1
+                total_run_frames_inferred += 1
                 telemetry_msg = self.kafka_handler.get_latest_telemetry_message()
 
                 current_frame_id = fr_count
@@ -648,6 +681,14 @@ class ObjectDetector:
             raise
         finally:
             total_runtime_sec = time.time() - run_start_time
+            self._log_run_summary(
+                total_runtime_sec,
+                total_run_frames_read,
+                total_run_frames_inferred,
+                detections_count,
+                batches_sent,
+                total_detected_objects,
+            )
             stream_diag.end(
                 total_detected_objects=total_detected_objects,
                 total_runtime_sec=total_runtime_sec,
