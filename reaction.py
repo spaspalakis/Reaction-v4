@@ -82,6 +82,12 @@ def main():
     with open("functions/config.json", "r") as config_file:
         config = json.load(config_file)
     config["verbose"] = bool(args.verbose)
+    if args.detection_fps is not None:
+        config["detection_fps"] = args.detection_fps
+    if args.message_size is not None:
+        config["message_size"] = max(1, args.message_size)
+    if args.send_raw_detections:
+        config["send_raw_detections"] = True
 
     if args.model:
         preset = arguments.MODEL_PRESETS[args.model]

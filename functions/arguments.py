@@ -20,8 +20,6 @@ else:
     VIDEO_FOLDER = 'video_input/'
     # USE_HDMI = False  # True  #
 
-DETECTION_RATE = 5  # 2  #
-
 # SavedModel dirs must match imgsz in each model's metadata.yaml (Ultralytics export).
 MODEL_PRESETS = {
     "land": {
@@ -94,6 +92,27 @@ def get_arguments():
     
     parser.add_argument("--polygon", action="store_true",
                         help="Parameter for polygon. Default: No polygon needed")
+
+    parser.add_argument(
+        "--detection-fps",
+        type=float,
+        default=None,
+        help="Max frames/sec to run inference on (stream: timer + fresh frame; video: frame stride). "
+             "0 = no limit. Overrides detection_fps in config.json.",
+    )
+
+    parser.add_argument(
+        "--message-size",
+        type=int,
+        default=None,
+        help="Emit to Kafka every N detection frames. Overrides message_size in config.json.",
+    )
+
+    parser.add_argument(
+        "--send-raw-detections",
+        action="store_true",
+        help="Skip DeepSORT track confirmation; send model detections immediately (test mode for low-fps sync).",
+    )
 
     parser.add_argument(
         "--model",

@@ -6,6 +6,10 @@
     "UAV_Telemetry_topic": "UAV_Telemetry",
 
     "batch_frame": 5,
+    "detection_fps": 0,
+    "send_raw_detections": false,
+    "detection_rate_log_interval_sec": 10,
+    "kafka_post_emit_delay_sec": 0,
     "score_thres": 0.5,
     "overlap_thres": 0.45,
     "max_cosine_distance": 0.2,

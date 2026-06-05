@@ -149,8 +149,15 @@ class KafkaProducer:
 
         if frame_ids:
             max_frame_id = max(frame_ids)
-            if max_frame_id % self.kafka_log_every_n_frames == 0:
-                logger.info(f"[Kafka] Sent detection in frame {max_frame_id} (msgIdentifier={mid})")
+            n_objects = sum(
+                len(item.get("detections", []))
+                for item in detection_list
+                if isinstance(item, dict)
+            )
+            logger.info(
+                f"[Kafka] Sent detection message: frame={max_frame_id}, "
+                f"objects={n_objects}, msgIdentifier={mid}"
+            )
         elif header.get("end_session", False):
             logger.info(f"[Kafka] End-session message sent (msgIdentifier={mid})")
 
