@@ -13,7 +13,6 @@ from datetime import datetime
 
 # Tracker and detection modules
 from deep_sort_utils.deep_sort_misc import create_box_encoder, Detection
-from deep_sort_utils.track import TrackState
 from deep_sort_utils import tracker as tracker_module
 from deep_sort_utils import nn_matching
 from compute_overlap import compute_overlap
@@ -30,6 +29,7 @@ from functions import ManageKafka
 from functions.internet_utils import get_external_ip
 from functions.kafka_handler import KafkaHandler
 from functions.logger import setup_logger   
+from functions.logger import is_quiet_terminal
 from functions.obj_geolocation import pixel_to_gps
 from functions.stream_diagnostics import StreamDiagnostics
 
@@ -59,6 +59,48 @@ class ObjectDetector:
         self.frame_data = []
         self.detection_map = {}
         self._current_frame_image = None
+        self._last_frame_outcome = {}
+
+    def _set_frame_outcome(self, frame_id, raw_count=0, final_count=0, reason="empty"):
+        """Record process_frame result; logged once per cycle in run()."""
+        self._last_frame_outcome = {
+            "frame_id": frame_id,
+            "raw_count": raw_count,
+            "final_count": final_count,
+            "reason": reason,
+        }
+
+    def _log_frame_cycle(self, frame_id, kafka_status=None):
+        """One compact log block per processed frame (read → infer → kafka)."""
+        outcome = self._last_frame_outcome or {}
+        raw = outcome.get("raw_count", 0)
+        final = outcome.get("final_count", 0)
+        reason = outcome.get("reason", "empty")
+
+        if reason == "empty" and not self.config.get("verbose"):
+            return
+
+        if reason == "empty":
+            infer_part = "infer: 0 detections"
+        elif reason == "raw_mode":
+            infer_part = f"infer: {final} detections (raw)"
+        elif reason == "tracker_pending":
+            infer_part = f"infer: {raw} boxes, tracker: pending"
+        elif reason == "overlap_filtered":
+            infer_part = f"infer: {raw} boxes, overlap: filtered"
+        else:
+            infer_part = f"infer: {final} detections"
+
+        if kafka_status:
+            kafka_part = f"kafka: {kafka_status}"
+        elif final > 0 or reason in ("raw_mode", "detected"):
+            kafka_part = "kafka: buffered"
+        else:
+            kafka_part = "kafka: skip"
+
+        if not is_quiet_terminal():
+            print("\n")
+        logger.info(f"[ODE] frame {frame_id} | {infer_part} | {kafka_part}")
 
     @staticmethod
     def _detection_rate_settings(config, vid_fps, is_stream_input):
@@ -121,17 +163,17 @@ class ObjectDetector:
             len(frame_data.get("detections", []))
             for frame_data in self.detection_map.values()
         )
-        logger.info(
-            f"[ODE] frame={frame_id}: queuing Kafka message with {n_objects} object(s)"
-        )
+        msg_id = message_obj.message["records"][0]["value"]["header"]["msgIdentifier"]
 
         if save_json_local:
             with open(json_path, "w") as f:
                 f.write(message_json)
-            logger.info(f"[ODE] JSON file saved: {json_path}")
+            if self.config.get("verbose"):
+                logger.info(f"[ODE] JSON saved: {json_path}")
 
         self.kafka_handler.add_detection(message_json)
         self.detection_map = {}
+        return n_objects, msg_id
 
 
 
@@ -199,14 +241,7 @@ class ObjectDetector:
         """Send model boxes immediately without waiting for confirmed DeepSORT tracks."""
         labels = [self._class_label(c) for c in classes]
         track_ids = [0] * len(boxes)
-
-        logger.info(
-            f"[ODE] frame={frame_id}: raw detection mode — sending {len(boxes)} object(s) immediately: "
-            + ", ".join(
-                f"{cls} {float(conf):.2f}"
-                for cls, conf in zip(labels, scores)
-            )
-        )
+        self._set_frame_outcome(frame_id, raw_count=len(boxes), final_count=len(boxes), reason="raw_mode")
 
         annot_img = dspl_bboxes_cv3.display_bboxes(
             original_image,
@@ -241,6 +276,7 @@ class ObjectDetector:
 
     def process_frame(self, image, infer, frame_id, ip,img_size,telemetry_msg):
         """Process a single frame and return annotated image and detected tracks."""
+        self._last_frame_outcome = {}
 
         original_image = image.copy()
         h_orig, w_orig, _ = original_image.shape
@@ -260,7 +296,7 @@ class ObjectDetector:
         classes = np.atleast_1d(classes)
         raw_count = len(scores)
         if raw_count == 0:
-            logger.info(f"[ODE] frame={frame_id}: no raw detections from model")
+            self._set_frame_outcome(frame_id, reason="empty")
             return None
 
         boxes = np.reshape(boxes, (-1, 4))
@@ -272,11 +308,6 @@ class ObjectDetector:
             )
 
         if raw_count > 0:
-            best_idx = int(np.argmax(scores))
-            best_cls_idx = int(classes[best_idx])
-            top_score = float(scores[best_idx])
-            top_class = self._class_label(best_cls_idx)
-
             # Deep SORT tracking
             boxes2 = boxes.copy().astype(int)
             boxes2[:, [2, 3]] = boxes2[:, [2, 3]] - boxes2[:, [0, 1]]
@@ -294,15 +325,10 @@ class ObjectDetector:
             # Track objects
             track_ids = [track.track_id for track in self.tracker.tracks if track.is_confirmed() and track.time_since_update <= 1]
             boxes2 = np.array([track.to_tlwh() for track in self.tracker.tracks if track.is_confirmed() and track.time_since_update <= 1])
-            tentative_tracks = sum(
-                1 for track in self.tracker.tracks if track.state == TrackState.Tentative
-            )
 
             if len(track_ids) == 0:
-                logger.info(
-                    f"[ODE] frame={frame_id}: model saw {raw_count} box(es) "
-                    f"(best={top_class} {top_score:.2f}) but 0 confirmed tracks "
-                    f"(tentative={tentative_tracks}) — not sent to Kafka"
+                self._set_frame_outcome(
+                    frame_id, raw_count=raw_count, reason="tracker_pending"
                 )
                 return None
 
@@ -323,22 +349,16 @@ class ObjectDetector:
                     final_track_ids, boxes, [self.classes_index[c] for c in classes], scores)
 
                 if len(filtered_boxes) == 0:
-                    logger.info(
-                        f"[ODE] frame={frame_id}: model saw {raw_count} box(es) "
-                        f"and {len(track_ids)} confirmed track(s), but 0 passed overlap filter "
-                        f"(threshold={OVERLAP_THRESHOLD}) — not sent to Kafka"
+                    self._set_frame_outcome(
+                        frame_id, raw_count=raw_count, reason="overlap_filtered"
                     )
                     return None
 
-                logger.info(
-                    f"[ODE] frame={frame_id}: detected {len(filtered_boxes)} object(s) "
-                    f"(raw={raw_count}, confirmed_tracks={len(track_ids)}): "
-                    + ", ".join(
-                        f"id={tid} {cls} {conf:.2f}"
-                        for tid, cls, conf in zip(
-                            filtered_track_ids, filtered_labels, filtered_scores
-                        )
-                    )
+                self._set_frame_outcome(
+                    frame_id,
+                    raw_count=raw_count,
+                    final_count=len(filtered_boxes),
+                    reason="detected",
                 )
 
                 annot_img = dspl_bboxes_cv3.display_bboxes(
@@ -445,34 +465,28 @@ class ObjectDetector:
         min_interval_sec = rate_settings["min_interval_sec"]
         video_frame_stride = rate_settings["video_frame_stride"]
         message_size = max(1, int(config.get("message_size", 1)))
-        kafka_post_emit_delay = float(config.get("kafka_post_emit_delay_sec", 0.2))
+        kafka_delay_sec = float(config.get("kafka_delay_sec", 0))
         rate_log_interval = float(config.get("detection_rate_log_interval_sec", 10.0))
 
-        if detection_fps > 0:
-            if is_stream_input:
-                logger.info(
-                    f"[ODE] Detection rate limit: {detection_fps:.2f} fps "
-                    f"(stream timer, drain buffer for freshest frame)"
-                )
-            else:
-                logger.info(
-                    f"[ODE] Detection rate limit: {detection_fps:.2f} fps "
-                    f"(process every {video_frame_stride} video frames)"
-                )
-        else:
-            logger.info("[ODE] Detection rate limit: disabled (process every read frame)")
-
         send_raw = bool(config.get("send_raw_detections"))
-        tracker_mode = "raw (immediate send)" if send_raw else "DeepSORT (needs 3 confirmed frames)"
-        logger.info(
-            "[ODE] === Run configuration === "
-            f"stream_fps={vid_fps:.0f} | "
-            f"detection_fps_limit={detection_fps or 'none'} | "
-            f"tracker={tracker_mode} | "
-            f"kafka_every={message_size} detection frame(s) | "
-            f"kafka_delay={kafka_post_emit_delay}s | "
-            f"score_thres={config.get('score_thres')}"
+        tracker_mode = "raw" if send_raw else "deepsort"
+        rate_mode = (
+            f"{detection_fps:.1f} fps"
+            if detection_fps > 0
+            else "unlimited"
         )
+        if not is_quiet_terminal():
+            dt.print_green(
+                f"[ODE] started | stream={vid_fps:.0f}fps | "
+                f"infer_limit={rate_mode} | tracker={tracker_mode} | "
+                f"kafka_every={message_size} | score>={config.get('score_thres')}"
+            )
+        else:
+            logger.info(
+                f"[ODE] started | stream={vid_fps:.0f}fps | "
+                f"infer_limit={rate_mode} | tracker={tracker_mode} | "
+                f"kafka_every={message_size} | score>={config.get('score_thres')}"
+            )
 
         last_processed_at = 0.0
         frames_read = 0
@@ -560,10 +574,11 @@ class ObjectDetector:
                     now = time.time()
                     elapsed = now - rate_log_start
                     if elapsed >= rate_log_interval:
+                        if not is_quiet_terminal():
+                            print("\n")
                         logger.info(
-                            f"[ODE] Rate: read={frames_read / elapsed:.2f} fps, "
-                            f"inference={frames_processed / elapsed:.2f} fps "
-                            f"(limit={detection_fps or 'none'}, kafka_every={message_size})"
+                            f"[ODE] throughput {frames_processed / elapsed:.1f} infer/s "
+                            f"({frames_read / elapsed:.1f} read/s)"
                         )
                         frames_read = 0
                         frames_processed = 0
@@ -582,28 +597,31 @@ class ObjectDetector:
 
                 current_frame_id = fr_count
                 output_image = self.process_frame(image, infer, current_frame_id, self.ip, img_size, telemetry_msg)
-                
-                # Skip if no detections
+
+                kafka_status = None
                 if output_image is None:
                     no_detection_streak += 1
-                    if no_detection_notice_every > 0 and no_detection_streak % no_detection_notice_every == 0:
-                        logger.info(
-                            f"[ODE] Running normally, no detections for {no_detection_streak} consecutive frames"
-                        )
+                    self._log_frame_cycle(current_frame_id)
                     fr_count += 1
                     continue
-                
+
                 fr_count += 1
                 detections_count += 1
-                if output_image is not None:
-                    total_detected_objects += len(self.detection_map.get(current_frame_id, {}).get("detections", []))
+                total_detected_objects += len(
+                    self.detection_map.get(current_frame_id, {}).get("detections", [])
+                )
                 no_detection_streak = 0
-                
+
                 if detections_count % message_size == 0:
-                    self.emit_detection_batch(current_frame_id, telemetry_msg, save_json)
+                    n_objects, msg_id = self.emit_detection_batch(
+                        current_frame_id, telemetry_msg, save_json
+                    )
                     batches_sent += 1
-                    if kafka_post_emit_delay > 0:
-                        time.sleep(kafka_post_emit_delay)
+                    kafka_status = f"sent ({n_objects} obj, msg={msg_id})"
+                    if kafka_delay_sec > 0:
+                        time.sleep(kafka_delay_sec)
+
+                self._log_frame_cycle(current_frame_id, kafka_status=kafka_status)
 
                 if save_frames:
                     im_path = f"{self.config['frames_folder']}/frame_{current_frame_id:04d}.jpg"

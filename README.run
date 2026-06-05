@@ -1,0 +1,129 @@
+# Reaction Docker Quick Run
+
+Run everything from the project root (`Reaction-v4`).
+
+## Build image
+
+docker build -t reaction-v4 .
+
+## Prepare runs folder permissions (important)
+
+mkdir -p runs
+sudo chown -R "$(id -u):$(id -g)" runs
+
+## Optional: GPU check (only if host has NVIDIA runtime)
+
+docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi
+
+
+## Problem with compute overlap
+
+   docker run --rm -v "$(pwd):/host" reaction-v4 \
+     sh -c 'cp /app/compute_overlap.cpython-*.so /host/ 2>/dev/null || true'
+
+     ------------------ (CPU-only, VPN/host networking) ------------------
+
+## 1) Video
+
+docker run --rm \
+  --network host \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd)/runs:/app/runs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --video --vpn-kafka
+
+##  2) USB camera /dev/video0
+
+docker run --rm \
+  --network host \
+  --device /dev/video0:/dev/video0 \
+  --group-add "$(getent group video | cut -d: -f3)" \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd)/runs:/app/runs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --usb-cam --vpn-kafka --model land
+
+
+## 3) Live Stream		
+
+docker run --rm \
+  --network host \
+  --device /dev/video0:/dev/video0 \
+  --group-add "$(getent group video | cut -d: -f3)" \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd)/runs:/app/runs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --rtsp --vpn-kafka --model land
+
+
+
+## 4) Run telemetry test producer
+
+docker run --rm --network host \
+  --entrypoint python3 \
+  reaction-v4 \
+  functions/test/producer_telemetry.py
+
+
+
+
+
+        --------------------- (With GPU, VPN/host networking) -----------------------------
+             
+             
+docker run --rm \
+  --gpus all \
+  --network host \
+  -u "$(id -u):$(id -g)" \
+  -v "$(pwd):/app" \
+  -v "$(pwd)/runs:/app/runs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --vpn-kafka
+
+
+
+
+  ---------------------  CLI arguments reference   --------------------- 
+
+All flags for `reaction.py` (defaults from `functions/config.json` unless noted):
+
+--usb-cam [/dev/videoN]   # USB camera input; optional device path (default: usb_cam_device in config)
+--video                   # Local video file from config (video_input_path)
+--video-path PATH         # Local video file path; overrides video_input_path (e.g. video_input/7shield_1.mp4)
+--rtsp                    # RTSP stream from config (rtsp_link)
+--vpn-kafka               # Use VPN Kafka broker (broker_vpn) instead of public broker
+
+--save-frames             # Save annotated frames under runs/<timestamp>/frames/
+--save-video              # Save annotated MP4 under runs/<timestamp>/video/
+--save-json               # Save detection JSON under runs/<timestamp>/json/ (Kafka sends regardless)
+
+--drone-name NAME         # Filter UAV_Telemetry by drone name (default: accept all)
+--drone-id N              # Filter UAV_Telemetry by drone id (default: accept all)
+--polygon                 # Enable polygon/NFZ gating; detection runs only inside allowed area
+
+--detection-fps N         # Max inference rate (frames/sec); 0 = no limit; stream uses timer + fresh frame
+--message-size N          # Send to Kafka every N detection frames (default: 1 = every detection)
+--send-raw-detections     # Skip DeepSORT; send model boxes immediately (sync test mode)
+--kafka-delay SEC         # Pause SEC seconds after each Kafka send; 0 = no pause (default: 0)
+--model {land,sea}        # Model preset: land (736²) or sea (640²); sets model_path, labels, input size
+
+--quiet                   # Less terminal output; logs still written under runs/<timestamp>/
+--verbose                 # Extra per-detection logs (class, confidence, track id)
+--test-stream             # Write stream diagnostics to runs/<timestamp>/test-stream
+
+Example (RTSP, raw detections, 1 infer/sec, no kafka delay):
+
+docker run --rm \
+  --network host \
+  -v "$(pwd):/app" \
+  -v "$(pwd)/runs:/app/runs" \
+  --entrypoint python3 \
+  reaction-v4 \
+  reaction.py --rtsp --vpn-kafka --model land --drone-name SIM_Alpha \
+    --detection-fps 1 --send-raw-detections --kafka-delay 0
+
+

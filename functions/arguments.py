@@ -48,6 +48,14 @@ def get_arguments():
     
     parser.add_argument("--video", action="store_true",
                         help="Use local video file defined in config.json")
+
+    parser.add_argument(
+        "--video-path",
+        type=str,
+        default=None,
+        help="Local video file path (e.g. video_input/7shield_1.mp4). "
+             "Overrides video_input_path in config.json.",
+    )
     
     parser.add_argument("--rtsp", action="store_true",
                         help="Use RTSP stream link defined in config.json")
@@ -112,6 +120,13 @@ def get_arguments():
         "--send-raw-detections",
         action="store_true",
         help="Skip DeepSORT track confirmation; send model detections immediately (test mode for low-fps sync).",
+    )
+
+    parser.add_argument(
+        "--kafka-delay",
+        type=float,
+        default=None,
+        help="Seconds to pause after each Kafka send (0 = no pause). Overrides kafka_delay_sec in config.json.",
     )
 
     parser.add_argument(

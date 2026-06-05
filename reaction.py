@@ -56,6 +56,10 @@ from functions.logger import setup_logger
 from functions.logger import is_quiet_terminal
 from functions.logger import format_run_timestamp, attach_run_log_file
 
+def _print_status(msg):
+    if not is_quiet_terminal():
+        dt.print_green(msg)
+
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 
 ### Tensorflow ####
@@ -88,6 +92,8 @@ def main():
         config["message_size"] = max(1, args.message_size)
     if args.send_raw_detections:
         config["send_raw_detections"] = True
+    if args.kafka_delay is not None:
+        config["kafka_delay_sec"] = max(0.0, args.kafka_delay)
 
     if args.model:
         preset = arguments.MODEL_PRESETS[args.model]
@@ -107,7 +113,7 @@ def main():
     else:
         # Default to local video file (or when --video is provided)
         input_mode = "video"
-        source_path = config["video_input_path"]
+        source_path = args.video_path or config["video_input_path"]
         input_name = os.path.splitext(os.path.basename(source_path))[0]
 
     from datetime import datetime as _dt
@@ -136,7 +142,7 @@ def main():
     check_folder_paths.folder_paths(
         config["frames_folder"],
         config["json_folder"],
-        config["video_input_path"],
+        source_path if input_mode == "video" else config["video_input_path"],
         config["video_output_folder"],
         save_frames=args.save_frames,
         save_json=args.save_json,
@@ -161,7 +167,7 @@ def main():
 
     # Select Kafka broker (VPN or public)
     selected_broker = config.get("broker_vpn") if getattr(args, "vpn_kafka", False) else config["broker"]
-    logger.info(f"[Main] Using Kafka broker: {selected_broker}")
+    # _print_status(f"Kafka broker: {selected_broker}")
 
     # Initialize Kafka Handler
     kafka_handler = KafkaHandler(
@@ -176,35 +182,36 @@ def main():
     
     # Create detector instance
     detector = ODE_v3.ObjectDetector(config, kafka_handler)
-    logger.info(f'[Main] Listen drone {args.drone_name} with ID: {args.drone_id}')
+    drone_name = args.drone_name or "any"
+    drone_id = args.drone_id if args.drone_id is not None else "any"
+    _print_status(f"Listening drone: {drone_name} (ID: {drone_id})")
 
     if args.polygon:
-        logger.info("[Main] POLYGON mode ON")
-        logger.info("[Main] Waiting for path planning message...")
+        _print_status("POLYGON mode ON")
+        _print_status("Waiting for path planning message...")
         while not kafka_handler.get_latest_pp_message():
             time.sleep(1)
-        logger.info("[Main] Path planning message received!")
-        
-        logger.info("[Main] Waiting for telemetry message...")
+        _print_status("Path planning message received")
+
+        _print_status("Waiting for telemetry...")
         while not kafka_handler.get_latest_telemetry_message():
             time.sleep(1)
-        logger.info("[Main] Telemetry message received!")
+        _print_status("Telemetry received")
 
     else:
-        logger.info("[Main] POLYGON mode OFF")
+        _print_status("POLYGON mode OFF")
 
-        # Check if a path planning message arrives before telemetry
         pp_msg = kafka_handler.get_latest_pp_message()
         if pp_msg:
-            logger.info("[Main] Path planning message received (no polygon mode)")
+            _print_status("Path planning message received (polygon mode off)")
 
-        logger.info("[Main] Waiting for telemetry message...")
+        _print_status("Waiting for telemetry...")
         while not kafka_handler.get_latest_telemetry_message():
             pp_msg = kafka_handler.get_latest_pp_message()
             if pp_msg:
-                logger.info("[Main] Path planning message received while waiting for telemetry")
+                _print_status("Path planning message received while waiting for telemetry")
             time.sleep(1)
-        logger.info("[Main] Telemetry message received!")
+        _print_status("Telemetry received")
 
 
     try:
@@ -212,9 +219,10 @@ def main():
 
             # Check if drone is in valid position
             if kafka_handler.is_drone_in_polygon(args.polygon):
-                logger.info("[Main] Drone is INSIDE the polygon. Starting detection...")
-                if not is_quiet_terminal():
-                    dt.print_blue('\n[Main] Check inside polygon from MAIN')
+                if args.polygon:
+                    _print_status("Drone INSIDE polygon — starting detection")
+                else:
+                    _print_status("Starting detection...")
 
                 # Start detection loop
                 result = detector.run(

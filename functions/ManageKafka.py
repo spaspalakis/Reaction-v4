@@ -11,7 +11,7 @@ from confluent_kafka import Consumer
 from functions import display_tools as dt
 import uuid # Add this import
 
-from functions.logger import setup_logger
+from functions.logger import setup_logger, is_quiet_terminal
 logger = setup_logger()
 
 
@@ -136,30 +136,12 @@ class KafkaProducer:
         self.producer.poll(0)
         self.producer.flush()
 
-        # Keep terminal cleaner: print Kafka send status every N frames.
-        frame_ids = []
-        body = header.get("body", {})
-        detection_list = body.get("detection_list", []) if isinstance(body, dict) else []
-        for item in detection_list:
-            if isinstance(item, dict) and item.get("frameID") is not None:
-                try:
-                    frame_ids.append(int(item["frameID"]))
-                except (TypeError, ValueError):
-                    pass
-
-        if frame_ids:
-            max_frame_id = max(frame_ids)
-            n_objects = sum(
-                len(item.get("detections", []))
-                for item in detection_list
-                if isinstance(item, dict)
-            )
-            logger.info(
-                f"[Kafka] Sent detection message: frame={max_frame_id}, "
-                f"objects={n_objects}, msgIdentifier={mid}"
-            )
-        elif header.get("end_session", False):
-            logger.info(f"[Kafka] End-session message sent (msgIdentifier={mid})")
+        if header.get("end_session", False):
+            if not is_quiet_terminal():
+                print("\n")
+                dt.print_green(f"[Kafka] end-session (msg={mid})")
+            else:
+                logger.info(f"[Kafka] end-session (msg={mid})")
 
 
 

@@ -18,11 +18,9 @@ def _open_usb_camera(source_path):
 def check_user_input(input_mode, source_path):
     q = _quiet_env()
 
-    if not q:
-        print(f'\nCheck user input:')
     if input_mode == "usb":
         if not q:
-            dt.print_green('Using USB camera input ..')
+            dt.print_green(["Check user input: ", "Using USB camera input .."])
         camera = _open_usb_camera(source_path)
 
         if not q:
@@ -48,10 +46,10 @@ def check_user_input(input_mode, source_path):
     else:
         if input_mode == "rtsp":
             if not q:
-                dt.print_green('Reading RTSP stream...')
+                dt.print_green(["Check user input: ", "Reading RTSP stream..."])
         else:
             if not q:
-                dt.print_green('Reading VIDEO from folder...')
+                dt.print_green(["Check user input: ", "Reading VIDEO from folder..."])
 
         camera = cv.VideoCapture(source_path)
         frame_width = int(camera.get(cv.CAP_PROP_FRAME_WIDTH))
