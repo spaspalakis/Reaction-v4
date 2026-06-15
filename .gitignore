@@ -34,4 +34,6 @@ __pycache__/
 .Python
 .venv/
 venv/
+.venv-pdf/
+docs/
 .env

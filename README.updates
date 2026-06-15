@@ -1,0 +1,7 @@
+15/6 
+> add extra CLI arguments --no-image, --no-payload 
+> Kafka producer: κανονική αποστολή με poll(0) μόνο· flush στο end-session και στο stop
+> Τerminal logs: ενιαία μορφή [Infer] / [Kafka], lock για σωστή σειρά, κενή γραμμή πριν το ζευγάρι infer+kafka
+> --info [N]: δειγματοληψία terminal (πράσινο/μπλε)· χωρίς flag = σιωπηλό terminal· --info=100 default, --info 1 = κάθε detection· ενεργοποιεί και [ODE] rate (cyan)
+> --sampling: στέλνει στο Kafka κάθε N-ο detected frame (μόνο το τρέχον frame, όχι batch πολλών frames στο ίδιο JSON)
+> info_detection_rate_every (config.json)· rate: (read/s) πρώτα, μετά infer/s

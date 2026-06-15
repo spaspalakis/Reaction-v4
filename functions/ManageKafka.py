@@ -123,8 +123,24 @@ class KafkaProducer:
         return message
 
 
-    def send_message(self,message):
-        """ Sends a message to the Kafka topic. """
+    def poll(self, timeout=0):
+        """Drive producer I/O and delivery callbacks without blocking (unless timeout > 0)."""
+        self.producer.poll(timeout)
+
+    def flush_pending(self, timeout=10):
+        """Wait for all queued producer messages to be delivered (call on stop / end-session)."""
+        remaining = self.producer.flush(timeout)
+        if remaining > 0:
+            logger.warning(f"[Kafka] flush timed out with {remaining} message(s) still pending")
+
+    @staticmethod
+    def format_frame_label(detection_list):
+        """Frame id(s) included in a Kafka detection message."""
+        frame_ids = [str(item.get("frameID", "?")) for item in detection_list]
+        return frame_ids[0] if len(frame_ids) == 1 else ",".join(frame_ids)
+
+    def send_message(self, message, flush=False, terminal_log=False):
+        """Send a message to the Kafka topic. Use flush=True only for end-session or shutdown."""
         if isinstance(message, str):
             message = json.loads(message)  # Convert string to dictionary if necessary
 
@@ -133,8 +149,9 @@ class KafkaProducer:
         mid = header['msgIdentifier']
         message_bytes = json.dumps(message, indent=2).encode('utf-8')
         self.producer.produce(self.topic, message_bytes, key="key", callback=self.delivery_report)
-        self.producer.poll(0)
-        self.producer.flush()
+        self.poll(0)
+        if flush:
+            self.flush_pending()
 
         if header.get("end_session", False):
             if not is_quiet_terminal():
@@ -142,6 +159,10 @@ class KafkaProducer:
                 dt.print_green(f"[Kafka] end-session (msg={mid})")
             else:
                 logger.info(f"[Kafka] end-session (msg={mid})")
+        elif terminal_log and not is_quiet_terminal():
+            detection_list = header.get("body", {}).get("detection_list", [])
+            frame_label = self.format_frame_label(detection_list)
+            dt.print_blue(dt.format_kafka_line(frame_label, mid))
 
 
 

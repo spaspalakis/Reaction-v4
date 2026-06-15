@@ -103,11 +103,13 @@ class KafkaHandler:
         Gracefully stop all Kafka handler threads and wait for them to finish.
         """
         self.running = False
-        if self.consumer_thread:
-            self.consumer_thread.join()
         if self.sender_thread:
             self.sender_thread.join()
-            
+        if self.consumer_thread:
+            self.consumer_thread.join()
+
+        self.kafka_producer.flush_pending()
+
         # Stop consumers
         self.consumer_telemetry.stop()
         self.consumer_pp.stop()
@@ -199,12 +201,12 @@ class KafkaHandler:
         while self.running:
             try:
                 # Get detection data from queue
-                detection_data = self.detection_queue.get(timeout=1)
+                detection_data, terminal_log = self.detection_queue.get(timeout=1)
                 if detection_data:
-                    # Send message to Kafka
-                    self.kafka_producer.send_message(detection_data)
+                    self.kafka_producer.send_message(detection_data, terminal_log=terminal_log)
                     self.detection_queue.task_done()
             except queue.Empty:
+                self.kafka_producer.poll(0)
                 continue
             except Exception as e:
                 dt.print_red(f"[KafkaHandler] Error in sender loop: {e}")
@@ -234,12 +236,12 @@ class KafkaHandler:
         except (ValueError, TypeError) as e:
             dt.print_red(f"[KafkaHandler] Error updating metadata: {e}")
 
-    def add_detection(self, detection_data: Dict[str, Any]):
+    def add_detection(self, detection_data: Dict[str, Any], terminal_log: bool = False):
         """
         Add detection data to the queue for sending.
         This is called by the ObjectDetector when new detections are available.
         """
-        self.detection_queue.put(detection_data)
+        self.detection_queue.put((detection_data, terminal_log))
 
     def send_end_session_signal(self):
         """
@@ -253,7 +255,7 @@ class KafkaHandler:
         if msg and isinstance(msg.get("telemetry"), dict):
             uav_status = msg["telemetry"].get("droneState")
         payload = Message.build_end_session_message(drone_id, drone_name, uav_status=uav_status)
-        self.kafka_producer.send_message(payload)
+        self.kafka_producer.send_message(payload, flush=True)
 
     def get_current_metadata(self) -> Dict[str, Any]:
         """

@@ -1,6 +1,7 @@
 # Theoretically this gathers tools that are connected to visualization either in console or not
 import os
 import sys
+import threading
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -10,6 +11,35 @@ import matplotlib
 import cv2
 # from mttkinter import mtTkinter
 # import image_manipulation_tools as imt
+
+
+_terminal_lock = threading.Lock()
+
+
+def format_infer_line(frame_id, object_count, classes_str, msg_id=None, raw=False):
+    """Green infer log: [Infer] -> Frame 2 | 1 (boat) | Kafka: msg=1"""
+    suffix = " raw" if raw else ""
+    if msg_id is not None:
+        kafka_part = f"Kafka: msg={msg_id}"
+    else:
+        kafka_part = "Kafka: buffered"
+    return f"[Infer] -> Frame {frame_id} | {object_count} ({classes_str}){suffix} | {kafka_part}"
+
+
+def format_kafka_line(frame_label, msg_id):
+    """Blue Kafka log: [Kafka] -> Frame 2 | msg=1"""
+    return f"[Kafka] -> Frame {frame_label} | msg={msg_id}"
+
+
+def _locked_print(*args, **kwargs):
+    kwargs.setdefault("flush", True)
+    with _terminal_lock:
+        print(*args, **kwargs)
+
+
+def print_blank():
+  """Empty terminal line (thread-safe)."""
+  _locked_print()
 
 
 def print2(args):
@@ -24,13 +54,13 @@ def print2(args):
 def print_green(args):
     if isinstance(args, list):
         if len(args) == 2:
-            print('{}\033[30;1;32m{}\033[00m'.format(args[0], args[1]))
+            _locked_print('{}\033[30;1;32m{}\033[00m'.format(args[0], args[1]))
         elif len(args) == 3:
-            print('{}\033[30;1;32m{}\033[00m{}'.format(args[0], args[1], args[2]))
+            _locked_print('{}\033[30;1;32m{}\033[00m{}'.format(args[0], args[1], args[2]))
         elif len(args) == 1:
-            print('\033[30;1;32m{}\033[00m'.format(args[0]))
+            _locked_print('\033[30;1;32m{}\033[00m'.format(args[0]))
     else:
-        print('\033[30;1;32m{}\033[00m'.format(args))
+        _locked_print('\033[30;1;32m{}\033[00m'.format(args))
 
 
 # def print_blue(args):
@@ -47,13 +77,13 @@ def print_green(args):
 def print_blue(args):
     if isinstance(args, list):
         if len(args) == 2:
-            print('{}\033[94m{}\033[00m'.format(args[0], args[1]))
+            _locked_print('{}\033[94m{}\033[00m'.format(args[0], args[1]))
         elif len(args) == 3:
-            print('{}\033[94m{}\033[00m{}'.format(args[0], args[1], args[2]))
+            _locked_print('{}\033[94m{}\033[00m{}'.format(args[0], args[1], args[2]))
         elif len(args) == 1:
-            print('\033[94m{}\033[00m'.format(args[0]))
+            _locked_print('\033[94m{}\033[00m'.format(args[0]))
     else:
-        print('\033[94m{}\033[00m'.format(args))
+        _locked_print('\033[94m{}\033[00m'.format(args))
 
 def print_yellow(args):
     if isinstance(args, list):

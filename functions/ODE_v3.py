@@ -1,7 +1,6 @@
 import os
 import cv2 as cv
 import time,json,requests
-import base64
 import numpy as np
 import tensorflow as tf
 from tqdm import tqdm
@@ -28,6 +27,7 @@ from functions import display_bboxes_cv3 as dspl_bboxes_cv3
 from functions import ManageKafka
 from functions.internet_utils import get_external_ip
 from functions.kafka_handler import KafkaHandler
+from functions.kafka_payload import build_detection_entry, build_frame_entry
 from functions.logger import setup_logger   
 from functions.logger import is_quiet_terminal
 from functions.obj_geolocation import pixel_to_gps
@@ -61,46 +61,71 @@ class ObjectDetector:
         self._current_frame_image = None
         self._last_frame_outcome = {}
 
-    def _set_frame_outcome(self, frame_id, raw_count=0, final_count=0, reason="empty"):
+    def _set_frame_outcome(self, frame_id, raw_count=0, final_count=0, reason="empty", classes=None):
         """Record process_frame result; logged once per cycle in run()."""
         self._last_frame_outcome = {
             "frame_id": frame_id,
             "raw_count": raw_count,
             "final_count": final_count,
             "reason": reason,
+            "classes": list(classes or []),
         }
 
-    def _log_frame_cycle(self, frame_id, kafka_status=None):
-        """One compact log block per processed frame (read → infer → kafka)."""
+    def _format_class_list(self, labels):
+        """Unique class names for terminal output, e.g. human/car."""
+        names = []
+        seen = set()
+        for lbl in labels:
+            if isinstance(lbl, (int, np.integer)):
+                name = self._class_label(lbl)
+            else:
+                name = str(lbl)
+            if name not in seen:
+                seen.add(name)
+                names.append(name)
+        return "/".join(names) if names else "?"
+
+    def _should_info_log(self, detections_count: int) -> bool:
+        interval = self.config.get("info")
+        if interval is None:
+            return False
+        return detections_count % max(1, int(interval)) == 0
+
+    def _log_detection(self, frame_id, detections_count=0, kafka_msg_id=None):
+        """Green terminal line when at least one object was detected."""
         outcome = self._last_frame_outcome or {}
-        raw = outcome.get("raw_count", 0)
         final = outcome.get("final_count", 0)
         reason = outcome.get("reason", "empty")
+        classes = outcome.get("classes", [])
 
-        if reason == "empty" and not self.config.get("verbose"):
+        if reason not in ("raw_mode", "detected") or final <= 0:
+            if self.config.get("verbose") and reason in ("tracker_pending", "overlap_filtered"):
+                raw = outcome.get("raw_count", 0)
+                if reason == "tracker_pending":
+                    msg = f"frame {frame_id} | infer: {raw} boxes, tracker pending"
+                else:
+                    msg = f"frame {frame_id} | infer: {raw} boxes, overlap filtered"
+                if not is_quiet_terminal():
+                    dt.print_green(msg)
             return
 
-        if reason == "empty":
-            infer_part = "infer: 0 detections"
-        elif reason == "raw_mode":
-            infer_part = f"infer: {final} detections (raw)"
-        elif reason == "tracker_pending":
-            infer_part = f"infer: {raw} boxes, tracker: pending"
-        elif reason == "overlap_filtered":
-            infer_part = f"infer: {raw} boxes, overlap: filtered"
-        else:
-            infer_part = f"infer: {final} detections"
+        if not self._should_info_log(detections_count):
+            return
 
-        if kafka_status:
-            kafka_part = f"kafka: {kafka_status}"
-        elif final > 0 or reason in ("raw_mode", "detected"):
-            kafka_part = "kafka: buffered"
-        else:
-            kafka_part = "kafka: skip"
-
-        if not is_quiet_terminal():
-            print("\n")
-        logger.info(f"[ODE] frame {frame_id} | {infer_part} | {kafka_part}")
+        classes_str = self._format_class_list(classes)
+        if is_quiet_terminal():
+            return
+        if kafka_msg_id is not None:
+            dt.print_blank()
+        dt.print_green(
+            dt.format_infer_line(
+                frame_id,
+                final,
+                classes_str,
+                msg_id=kafka_msg_id,
+                raw=(reason == "raw_mode"),
+            )
+        )
 
     def _log_run_summary(
         self,
@@ -169,7 +194,7 @@ class ObjectDetector:
         return camera.read()
 
     def emit_detection_batch(self, frame_id, telemetry_msg, save_json_local: bool):
-        """Build detection payload, publish to Kafka always; write JSON under json_folder only if save_json_local."""
+        """Build a single-frame detection payload for Kafka (see config sampling for send cadence)."""
         json_path = os.path.join(self.config['json_folder'], f"reaction_msg_{frame_id:04d}.json")
 
         telemetry = telemetry_msg.get("telemetry", {})
@@ -197,9 +222,8 @@ class ObjectDetector:
             if self.config.get("verbose"):
                 logger.info(f"[ODE] JSON saved: {json_path}")
 
-        self.kafka_handler.add_detection(message_json)
         self.detection_map = {}
-        return n_objects, msg_id
+        return n_objects, msg_id, message_json
 
 
 
@@ -207,31 +231,23 @@ class ObjectDetector:
         """Store detection under the correct frameID."""
         
         telemetry = telemetry_msg.get("telemetry", {})
-        # dt.print_green(f'\n[ODE-add_detection] telemetry: {telemetry}'  )
+        payload_opts = self.config.get("kafka_payload", {})
 
         lat = telemetry.get("latitude") 
         lon = telemetry.get("longitude") 
         alt = telemetry.get("altitude") 
 
         if frame_id not in self.detection_map:
-            image_b64 = ""
-            if self._current_frame_image is not None:
-                quality = self.config.get('image_jpeg_quality', 80)
-                _, buf = cv.imencode('.jpg', self._current_frame_image, [cv.IMWRITE_JPEG_QUALITY, quality])
-                image_b64 = base64.b64encode(buf).decode('utf-8')
-
-            self.detection_map[frame_id] = {
-                "frameID": frame_id,
-                "imageData": image_b64,
-                "detections": [],
-                "GeoLocation": {
-                    "latitude": lat,
-                    "longitude": lon, 
-                    "altitude": alt 
-                }
-            }
+            self.detection_map[frame_id] = build_frame_entry(
+                frame_id,
+                payload_opts=payload_opts,
+                frame_image=self._current_frame_image,
+                jpeg_quality=self.config.get("image_jpeg_quality", 80),
+                latitude=lat,
+                longitude=lon,
+                altitude=alt,
+            )
         fov = (68, 40)
-
 
         heading = telemetry.get("heading") 
         pitch =  telemetry.get("gimbalAngle") 
@@ -244,13 +260,16 @@ class ObjectDetector:
         center_pixel = (int((x1 + x2) / 2), int((y1 + y2) / 2))
         obj_gps = pixel_to_gps(center_pixel, img_size, fov, drone_info)
 
-        self.detection_map[frame_id]["detections"].append({
-            "objectID": object_id,
-            "class": object_class,
-            "confidence": confidence,
-            "bbox": bbox,
-            "obj_geolocation": obj_gps
-        })
+        self.detection_map[frame_id]["detections"].append(
+            build_detection_entry(
+                payload_opts=payload_opts,
+                object_id=object_id,
+                object_class=object_class,
+                confidence=confidence,
+                bbox=bbox,
+                obj_gps=obj_gps,
+            )
+        )
 
     def finalize_detections(self, message_obj):
         """Convert stored detections into the correct JSON structure."""
@@ -267,7 +286,13 @@ class ObjectDetector:
         """Send model boxes immediately without waiting for confirmed DeepSORT tracks."""
         labels = [self._class_label(c) for c in classes]
         track_ids = [0] * len(boxes)
-        self._set_frame_outcome(frame_id, raw_count=len(boxes), final_count=len(boxes), reason="raw_mode")
+        self._set_frame_outcome(
+            frame_id,
+            raw_count=len(boxes),
+            final_count=len(boxes),
+            reason="raw_mode",
+            classes=labels,
+        )
 
         annot_img = dspl_bboxes_cv3.display_bboxes(
             original_image,
@@ -327,7 +352,7 @@ class ObjectDetector:
 
         boxes = np.reshape(boxes, (-1, 4))
 
-        if self.config.get("send_raw_detections"):
+        if self.config.get("raw_detections"):
             return self._process_raw_detections(
                 original_image, boxes, classes, scores,
                 frame_id, ip, img_size, telemetry_msg,
@@ -385,6 +410,7 @@ class ObjectDetector:
                     raw_count=raw_count,
                     final_count=len(filtered_boxes),
                     reason="detected",
+                    classes=filtered_labels,
                 )
 
                 annot_img = dspl_bboxes_cv3.display_bboxes(
@@ -490,28 +516,33 @@ class ObjectDetector:
         detection_fps = rate_settings["detection_fps"]
         min_interval_sec = rate_settings["min_interval_sec"]
         video_frame_stride = rate_settings["video_frame_stride"]
-        message_size = max(1, int(config.get("message_size", 1)))
+        sampling = max(1, int(config.get("sampling", 1)))
         kafka_delay_sec = float(config.get("kafka_delay_sec", 0))
-        rate_log_interval = float(config.get("detection_rate_log_interval_sec", 10.0))
+        rate_log_interval = float(config.get("info_detection_rate_every", 10.0))
 
-        send_raw = bool(config.get("send_raw_detections"))
+        send_raw = bool(config.get("raw_detections"))
         tracker_mode = "raw" if send_raw else "deepsort"
         rate_mode = (
             f"{detection_fps:.1f} fps"
             if detection_fps > 0
             else "unlimited"
         )
+        info_mode = (
+            f"info={int(config['info'])}"
+            if config.get("info") is not None
+            else "info=off"
+        )
         if not is_quiet_terminal():
             dt.print_green(
                 f"[ODE] started | stream={vid_fps:.0f}fps | "
                 f"infer_limit={rate_mode} | tracker={tracker_mode} | "
-                f"kafka_every={message_size} | score>={config.get('score_thres')}"
+                f"sampling={sampling} | {info_mode} | score>={config.get('score_thres')}"
             )
         else:
             logger.info(
                 f"[ODE] started | stream={vid_fps:.0f}fps | "
                 f"infer_limit={rate_mode} | tracker={tracker_mode} | "
-                f"kafka_every={message_size} | score>={config.get('score_thres')}"
+                f"sampling={sampling} | {info_mode} | score>={config.get('score_thres')}"
             )
 
         last_processed_at = 0.0
@@ -599,17 +630,17 @@ class ObjectDetector:
 
                 frames_read += 1
                 total_run_frames_read += 1
-                if rate_log_interval > 0:
+                if rate_log_interval > 0 and config.get("info") is not None:
                     now = time.time()
                     elapsed = now - rate_log_start
                     if elapsed >= rate_log_interval:
                         msg = (
-                            f"[ODE] throughput {frames_processed / elapsed:.1f} infer/s "
-                            f"({frames_read / elapsed:.1f} read/s)"
+                            f"[ODE] rate ({frames_read / elapsed:.1f} read/s) | "
+                            f"{frames_processed / elapsed:.1f} infer/s"
                         )
                         if not is_quiet_terminal():
                             print("\n")
-                            dt.print_green(msg)
+                            dt.print_cyan(msg)
                         else:
                             logger.info(msg)
                         frames_read = 0
@@ -631,10 +662,8 @@ class ObjectDetector:
                 current_frame_id = fr_count
                 output_image = self.process_frame(image, infer, current_frame_id, self.ip, img_size, telemetry_msg)
 
-                kafka_status = None
                 if output_image is None:
                     no_detection_streak += 1
-                    self._log_frame_cycle(current_frame_id)
                     fr_count += 1
                     continue
 
@@ -644,17 +673,24 @@ class ObjectDetector:
                     self.detection_map.get(current_frame_id, {}).get("detections", [])
                 )
                 no_detection_streak = 0
+                info_log = self._should_info_log(detections_count)
 
-                if detections_count % message_size == 0:
-                    n_objects, msg_id = self.emit_detection_batch(
+                if detections_count % sampling == 0:
+                    n_objects, msg_id, message_json = self.emit_detection_batch(
                         current_frame_id, telemetry_msg, save_json
                     )
                     batches_sent += 1
-                    kafka_status = f"sent ({n_objects} obj, msg={msg_id})"
+                    self._log_detection(
+                        current_frame_id,
+                        detections_count=detections_count,
+                        kafka_msg_id=msg_id,
+                    )
+                    self.kafka_handler.add_detection(message_json, terminal_log=info_log)
                     if kafka_delay_sec > 0:
                         time.sleep(kafka_delay_sec)
-
-                self._log_frame_cycle(current_frame_id, kafka_status=kafka_status)
+                else:
+                    self._log_detection(current_frame_id, detections_count=detections_count)
+                    self.detection_map = {}
 
                 if save_frames:
                     im_path = f"{self.config['frames_folder']}/frame_{current_frame_id:04d}.jpg"

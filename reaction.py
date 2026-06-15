@@ -72,6 +72,7 @@ from functions import user_input
 from functions import check_folder_paths
 from functions import ODE_v3
 from functions.kafka_handler import KafkaHandler
+from functions.kafka_payload import resolve_payload_options, payload_summary
 logger = setup_logger()
 
 def main():
@@ -88,12 +89,20 @@ def main():
     config["verbose"] = bool(args.verbose)
     if args.detection_fps is not None:
         config["detection_fps"] = args.detection_fps
-    if args.message_size is not None:
-        config["message_size"] = max(1, args.message_size)
-    if args.send_raw_detections:
-        config["send_raw_detections"] = True
+    if args.sampling is not None:
+        config["sampling"] = max(1, args.sampling)
+
+    config["info"] = max(1, args.info) if args.info is not None else None
+    if config["info"] is not None:
+        logger.info(f"[Main] Terminal info logging every {config['info']} detection(s)")
+
+    if args.raw_detections:
+        config["raw_detections"] = True
     if args.kafka_delay is not None:
         config["kafka_delay_sec"] = max(0.0, args.kafka_delay)
+
+    config["kafka_payload"] = resolve_payload_options(config, args)
+    logger.info(f"[Main] Kafka payload: {payload_summary(config['kafka_payload'])}")
 
     if args.model:
         preset = arguments.MODEL_PRESETS[args.model]

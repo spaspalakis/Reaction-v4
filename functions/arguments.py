@@ -110,14 +110,26 @@ def get_arguments():
     )
 
     parser.add_argument(
-        "--message-size",
+        "--sampling",
         type=int,
         default=None,
-        help="Emit to Kafka every N detection frames. Overrides message_size in config.json.",
+        help="Send to Kafka every N-th detected frame (current frame only; 1 = every detection). "
+             "Overrides sampling in config.json.",
     )
 
     parser.add_argument(
-        "--send-raw-detections",
+        "--info",
+        nargs="?",
+        const=100,
+        default=None,
+        type=int,
+        metavar="N",
+        help="Terminal [Infer]/[Kafka] logs every N detection frames (--info alone = 100; --info 1 = all). "
+             "Also enables periodic [ODE] rate stats.",
+    )
+
+    parser.add_argument(
+        "--raw-detections",
         action="store_true",
         help="Skip DeepSORT track confirmation; send model detections immediately (test mode for low-fps sync).",
     )
@@ -127,6 +139,21 @@ def get_arguments():
         type=float,
         default=None,
         help="Seconds to pause after each Kafka send (0 = no pause). Overrides kafka_delay_sec in config.json.",
+    )
+
+    parser.add_argument(
+        "--no-image",
+        action="store_true",
+        help="Omit image payload (imageData stays empty) for faster Kafka sends / latency tests.",
+    )
+
+    parser.add_argument(
+        "--no-payload",
+        action="append",
+        default=[],
+        metavar="FIELD",
+        help="Exclude payload fields (repeatable): image, geo_location, obj_geolocation. "
+             "Aliases: no-image, geo, obj_geo.",
     )
 
     parser.add_argument(

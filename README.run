@@ -68,13 +68,21 @@ docker run --rm --network host \
   functions/test/producer_telemetry.py
 
 
+## 5) Run test consumer
+
+ docker run --rm --network host \
+  --entrypoint python3 \
+  reaction-v4 \
+  functions/test/consumer.py --topic ObjectDetection
 
 
 
         --------------------- (With GPU, VPN/host networking) -----------------------------
              
              
-docker run --rm \
+
+docker rm -f reaction-rtsp 2>/dev/null; docker run --rm \
+  --name reaction-rtsp \
   --gpus all \
   --network host \
   -u "$(id -u):$(id -g)" \
@@ -82,8 +90,12 @@ docker run --rm \
   -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
-  reaction.py --vpn-kafka
+  reaction.py --rtsp --vpn-kafka --model land --drone-name SIM_Alpha
 
+
+# Τι τρέχει / GPU
+docker ps --filter name=reaction-
+nvidia-smi
 
 
 
@@ -105,9 +117,10 @@ All flags for `reaction.py` (defaults from `functions/config.json` unless noted)
 --drone-id N              # Filter UAV_Telemetry by drone id (default: accept all)
 --polygon                 # Enable polygon/NFZ gating; detection runs only inside allowed area
 
---detection-fps N         # Max inference rate (frames/sec); 0 = no limit; stream uses timer + fresh frame
---message-size N          # Send to Kafka every N detection frames (default: 1 = every detection)
---send-raw-detections     # Skip DeepSORT; send model boxes immediately (sync test mode)
+--detection-fps [N]         # Max inference rate (frames/sec); 0 = no limit; stream uses timer + fresh frame
+--sampling [N]              # Send to Kafka every N-th detected frame (current frame only; 1 = every detection)
+--info [N]                # Terminal [Infer]/[Kafka] every N detections (--info = 100; --info 1 = all); enables rate stats
+--raw-detections          # Skip DeepSORT; send model boxes immediately (sync test mode)
 --kafka-delay SEC         # Pause SEC seconds after each Kafka send; 0 = no pause (default: 0)
 --model {land,sea}        # Model preset: land (736²) or sea (640²); sets model_path, labels, input size
 
@@ -124,6 +137,6 @@ docker run --rm \
   --entrypoint python3 \
   reaction-v4 \
   reaction.py --rtsp --vpn-kafka --model land --drone-name SIM_Alpha \
-    --detection-fps 1 --send-raw-detections --kafka-delay 0
+    --detection-fps 1 --raw-detections --kafka-delay 0
 
 
