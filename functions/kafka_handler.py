@@ -36,7 +36,12 @@ class KafkaHandler:
         self.consumer_telemetry = Consumer_UAV_Telemetry(broker=broker,
                                                          selected_drone_id=selected_drone_id,
                                                          selected_drone_name=selected_drone_name)
-        self.kafka_producer = KafkaProducer(broker, producer_topic)
+        self.kafka_producer = KafkaProducer(
+            broker,
+            producer_topic,
+            on_delivered=self._on_kafka_delivered,
+            on_delivery_failed=self._on_kafka_delivery_failed,
+        )
         
         # Set topics
         self.consumer_telemetry.topic_in = UAV_Telemetry_topic
@@ -52,6 +57,10 @@ class KafkaHandler:
         self._latest_telemetry_message: Optional[Dict[str, Any]] = None
         self._pp_lock = threading.Lock()
         self._telemetry_lock = threading.Lock()
+        self._kafka_stats_lock = threading.Lock()
+        self._kafka_queued_window = 0
+        self._kafka_confirmed_window = 0
+        self._kafka_failed_window = 0
 
         
         # Current state - stores latest metadata from CommandControl
@@ -116,6 +125,31 @@ class KafkaHandler:
         
         if not __import__("os").environ.get("REACTION_QUIET", "").lower() in ("1", "true", "yes"):
             dt.print_green("[KafkaHandler] Stopped all threads")
+
+    def _on_kafka_delivered(self):
+        with self._kafka_stats_lock:
+            self._kafka_confirmed_window += 1
+
+    def _on_kafka_delivery_failed(self):
+        with self._kafka_stats_lock:
+            self._kafka_failed_window += 1
+
+    def record_kafka_queued(self):
+        with self._kafka_stats_lock:
+            self._kafka_queued_window += 1
+
+    def consume_kafka_rate_stats(self):
+        """Return and reset Kafka counters for the current rate window."""
+        with self._kafka_stats_lock:
+            stats = (
+                self._kafka_queued_window,
+                self._kafka_confirmed_window,
+                self._kafka_failed_window,
+            )
+            self._kafka_queued_window = 0
+            self._kafka_confirmed_window = 0
+            self._kafka_failed_window = 0
+            return stats
 
     def _consumer_loop(self):
         """
@@ -241,6 +275,7 @@ class KafkaHandler:
         Add detection data to the queue for sending.
         This is called by the ObjectDetector when new detections are available.
         """
+        self.record_kafka_queued()
         self.detection_queue.put((detection_data, terminal_log))
 
     def send_end_session_signal(self):

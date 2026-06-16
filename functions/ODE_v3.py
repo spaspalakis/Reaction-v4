@@ -493,7 +493,7 @@ class ObjectDetector:
 
         frame_count_hint = camera.get(cv.CAP_PROP_FRAME_COUNT)
         is_likely_file = bool(frame_count_hint and frame_count_hint > 0 and np.isfinite(frame_count_hint))
-        is_stream_input = input_mode in ("rtsp", "usb") or not is_likely_file
+        is_stream_input = input_mode in ("stream", "usb") or not is_likely_file
 
         stream_diag = StreamDiagnostics(
             enabled=stream_test_enabled,
@@ -634,10 +634,17 @@ class ObjectDetector:
                     now = time.time()
                     elapsed = now - rate_log_start
                     if elapsed >= rate_log_interval:
+                        kafka_queued, kafka_ack, kafka_failed = (
+                            self.kafka_handler.consume_kafka_rate_stats()
+                        )
                         msg = (
                             f"[ODE] rate ({frames_read / elapsed:.1f} read/s) | "
-                            f"{frames_processed / elapsed:.1f} infer/s"
+                            f"{frames_processed / elapsed:.1f} infer/s | "
+                            f"{kafka_queued / elapsed:.1f} kafka/s ({kafka_queued} queued) | "
+                            f"{kafka_ack / elapsed:.1f} ack/s ({kafka_ack} ack)"
                         )
+                        if kafka_failed:
+                            msg += f" | {kafka_failed} failed"
                         if not is_quiet_terminal():
                             print("\n")
                             dt.print_cyan(msg)

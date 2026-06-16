@@ -115,10 +115,10 @@ def main():
         input_mode = "usb"
         source_path = args.usb_cam if isinstance(args.usb_cam, str) else config["usb_cam_device"]
         input_name = "usb-cam"
-    elif args.rtsp:
-        input_mode = "rtsp"
+    elif args.stream:
+        input_mode = "stream"
         source_path = config["rtsp_link"]
-        input_name = "rtsp"
+        input_name = "stream"
     else:
         # Default to local video file (or when --video is provided)
         input_mode = "video"

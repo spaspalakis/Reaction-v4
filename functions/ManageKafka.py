@@ -89,9 +89,11 @@ class Message:
 
 
 class KafkaProducer:
-    def __init__(self,broker,topic):
+    def __init__(self, broker, topic, on_delivered=None, on_delivery_failed=None):
         self.broker = broker
         self.topic = topic
+        self.on_delivered = on_delivered
+        self.on_delivery_failed = on_delivery_failed
 
         self.producer_conf = {
             'bootstrap.servers': self.broker,#"apps.edutel.uniwa.gr:9092", #broker
@@ -103,12 +105,14 @@ class KafkaProducer:
         self.kafka_log_every_n_frames = 20
 
 
-    def delivery_report(self,err, msg):
-        """ Callback for message delivery reports. """
+    def delivery_report(self, err, msg):
+        """Callback for message delivery reports."""
         if err is not None:
             logger.error(f"Message delivery failed: {err}")
-        # else:
-            # print(f"[Producer] Message delivered to {msg.topic()} [{msg.partition()}]")
+            if self.on_delivery_failed:
+                self.on_delivery_failed()
+        elif self.on_delivered:
+            self.on_delivered()
 
     @staticmethod
     def update_timestamp(message):

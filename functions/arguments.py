@@ -57,8 +57,8 @@ def get_arguments():
              "Overrides video_input_path in config.json.",
     )
     
-    parser.add_argument("--rtsp", action="store_true",
-                        help="Use RTSP stream link defined in config.json")
+    parser.add_argument("--stream", action="store_true",
+                        help="Use RTSP stream link defined in config.json (rtsp_link)")
     
 
 

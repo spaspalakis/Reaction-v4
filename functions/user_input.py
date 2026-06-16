@@ -44,7 +44,7 @@ def check_user_input(input_mode, source_path):
                 raise ValueError('Could not get USB input after 5 attempts. Aborting...')
 
     else:
-        if input_mode == "rtsp":
+        if input_mode == "stream":
             if not q:
                 dt.print_green(["Check user input: ", "Reading RTSP stream..."])
         else:

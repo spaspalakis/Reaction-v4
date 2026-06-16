@@ -56,7 +56,7 @@ docker run --rm \
   -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
-  reaction.py --rtsp --vpn-kafka --model land
+  reaction.py --stream --vpn-kafka --model land
 
 
 
@@ -90,7 +90,7 @@ docker rm -f reaction-rtsp 2>/dev/null; docker run --rm \
   -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
-  reaction.py --rtsp --vpn-kafka --model land --drone-name SIM_Alpha
+  reaction.py --stream --vpn-kafka --model land --drone-name SIM_Alpha
 
 
 # Τι τρέχει / GPU
@@ -106,7 +106,7 @@ All flags for `reaction.py` (defaults from `functions/config.json` unless noted)
 --usb-cam [/dev/videoN]   # USB camera input; optional device path (default: usb_cam_device in config)
 --video                   # Local video file from config (video_input_path)
 --video-path PATH         # Local video file path; overrides video_input_path (e.g. video_input/7shield_1.mp4)
---rtsp                    # RTSP stream from config (rtsp_link)
+--stream                  # RTSP stream from config (rtsp_link)
 --vpn-kafka               # Use VPN Kafka broker (broker_vpn) instead of public broker
 
 --save-frames             # Save annotated frames under runs/<timestamp>/frames/
@@ -136,7 +136,7 @@ docker run --rm \
   -v "$(pwd)/runs:/app/runs" \
   --entrypoint python3 \
   reaction-v4 \
-  reaction.py --rtsp --vpn-kafka --model land --drone-name SIM_Alpha \
+  reaction.py --stream --vpn-kafka --model land --drone-name SIM_Alpha \
     --detection-fps 1 --raw-detections --kafka-delay 0
 
 
