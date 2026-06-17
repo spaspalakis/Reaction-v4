@@ -55,6 +55,7 @@ class KafkaHandler:
         self.last_message_time = time.time()
         self._latest_pp_message: Optional[Dict[str, Any]] = None
         self._latest_telemetry_message: Optional[Dict[str, Any]] = None
+        self._telemetry_received_at: Optional[float] = None
         self._pp_lock = threading.Lock()
         self._telemetry_lock = threading.Lock()
         self._kafka_stats_lock = threading.Lock()
@@ -184,6 +185,7 @@ class KafkaHandler:
                 if message_telemetry is not None:
                     with self._telemetry_lock:
                         self._latest_telemetry_message = message_telemetry
+                        self._telemetry_received_at = time.time()
                 else:
                     continue
 
@@ -327,6 +329,13 @@ class KafkaHandler:
         """
         with self._telemetry_lock:
             return  self._latest_telemetry_message
+
+    def get_telemetry_age_sec(self) -> Optional[float]:
+        """Seconds since the last UAV_Telemetry message was received (None if never)."""
+        with self._telemetry_lock:
+            if self._telemetry_received_at is None:
+                return None
+            return time.time() - self._telemetry_received_at
 
     def is_drone_in_polygon(self,polygon_flag) -> bool:
         """

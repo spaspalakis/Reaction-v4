@@ -129,7 +129,12 @@ def get_arguments():
     )
 
     parser.add_argument(
-        "--raw-detections",
+        "--debug-geo",
+        action="store_true",
+        help="On each Kafka send: print drone telemetry, bbox pixels, and computed obj_geolocation.",
+    )
+
+    parser.add_argument(
         action="store_true",
         help="Skip DeepSORT track confirmation; send model detections immediately (test mode for low-fps sync).",
     )

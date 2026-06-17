@@ -193,6 +193,47 @@ class ObjectDetector:
             return camera.retrieve()
         return camera.read()
 
+    def _log_geo_debug(self, frame_id, telemetry_msg, msg_id, telemetry_age_sec=None):
+        """Yellow terminal dump of drone telemetry + per-object bbox/obj_geolocation (Kafka send)."""
+        if not self.config.get("debug_geo") or is_quiet_terminal():
+            return
+
+        if telemetry_msg is None:
+            dt.print_yellow(f"[Geo] frame={frame_id} msg={msg_id} | NO TELEMETRY")
+            return
+
+        tel = telemetry_msg.get("telemetry", {}) or {}
+        iso = telemetry_msg.get("iso_time", "?")
+        age = f"{telemetry_age_sec:.2f}s" if telemetry_age_sec is not None else "?"
+        drone_line = (
+            f"[Geo] frame={frame_id} msg={msg_id} | tel_age={age} iso={iso} | "
+            f"lat={tel.get('latitude')} lon={tel.get('longitude')} alt={tel.get('altitude')} | "
+            f"heading={tel.get('heading')} gimbal={tel.get('gimbalAngle')}"
+        )
+        dt.print_yellow(drone_line)
+
+        frame_data = self.detection_map.get(frame_id)
+        if not frame_data:
+            for fd in self.detection_map.values():
+                frame_data = fd
+                break
+        if not frame_data:
+            dt.print_yellow(f"[Geo]   (no detections in batch)")
+            return
+
+        geo = frame_data.get("GeoLocation", {})
+        dt.print_yellow(
+            f"[Geo]   frame GeoLocation: lat={geo.get('latitude')} "
+            f"lon={geo.get('longitude')} alt={geo.get('altitude')}"
+        )
+        for det in frame_data.get("detections", []):
+            bbox = det.get("bbox")
+            obj_geo = det.get("obj_geolocation")
+            dt.print_yellow(
+                f"[Geo]   obj id={det.get('objectID')} class={det.get('class')} "
+                f"bbox={bbox} obj_geo={obj_geo}"
+            )
+
     def emit_detection_batch(self, frame_id, telemetry_msg, save_json_local: bool):
         """Build a single-frame detection payload for Kafka (see config sampling for send cadence)."""
         json_path = os.path.join(self.config['json_folder'], f"reaction_msg_{frame_id:04d}.json")
@@ -209,12 +250,20 @@ class ObjectDetector:
             print(f"\n[ODE] Created message at {datetime.utcnow().isoformat()}Z: msgIdentifier={message_obj.message['records'][0]['value']['header']['msgIdentifier']}")
 
         self.finalize_detections(message_obj)
-        message_json = message_obj.to_json()
         n_objects = sum(
             len(frame_data.get("detections", []))
             for frame_data in self.detection_map.values()
         )
         msg_id = message_obj.message["records"][0]["value"]["header"]["msgIdentifier"]
+
+        telemetry_age = (
+            self.kafka_handler.get_telemetry_age_sec()
+            if self.config.get("debug_geo")
+            else None
+        )
+        self._log_geo_debug(frame_id, telemetry_msg, msg_id, telemetry_age)
+
+        message_json = message_obj.to_json()
 
         if save_json_local:
             with open(json_path, "w") as f:

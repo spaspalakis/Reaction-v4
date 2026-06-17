@@ -70,7 +70,7 @@ def main():
         "bootstrap.servers": args.broker,
         "security.protocol": "PLAINTEXT",
         "group.id": args.group_id,
-        "auto.offset.reset": "earliest" if args.from_earliest else "latest",
+        "auto.offset.reset": "latest",
     }
 
     consumer = Consumer(conf)
