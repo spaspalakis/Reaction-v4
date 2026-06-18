@@ -84,6 +84,7 @@ class KafkaHandler:
         # Store selected drone ID
         self.selected_drone_id = selected_drone_id
         self.selected_drone_name = selected_drone_name
+        self.debug_geo = False
 
         # Add frame counting attributes
         self.frames_since_last_telemetry = 0
@@ -186,6 +187,13 @@ class KafkaHandler:
                     with self._telemetry_lock:
                         self._latest_telemetry_message = message_telemetry
                         self._telemetry_received_at = time.time()
+                    if self.debug_geo and not __import__("os").environ.get("REACTION_QUIET", "").lower() in ("1", "true", "yes"):
+                        tel = message_telemetry.get("telemetry", {}) or {}
+                        dt.print_yellow(
+                            f"[Tel] recv iso={message_telemetry.get('iso_time', '?')} | "
+                            f"lat={tel.get('latitude')} lon={tel.get('longitude')} alt={tel.get('altitude')} | "
+                            f"heading={tel.get('heading')} gimbal={tel.get('gimbalAngle')}"
+                        )
                 else:
                     continue
 

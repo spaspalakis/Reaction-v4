@@ -229,9 +229,15 @@ class ObjectDetector:
         for det in frame_data.get("detections", []):
             bbox = det.get("bbox")
             obj_geo = det.get("obj_geolocation")
+            center = None
+            if bbox and len(bbox) >= 4:
+                center = (
+                    int((bbox[0] + bbox[2]) / 2),
+                    int((bbox[1] + bbox[3]) / 2),
+                )
             dt.print_yellow(
                 f"[Geo]   obj id={det.get('objectID')} class={det.get('class')} "
-                f"bbox={bbox} obj_geo={obj_geo}"
+                f"bbox={bbox} center_px={center} obj_geo={obj_geo}"
             )
 
     def emit_detection_batch(self, frame_id, telemetry_msg, save_json_local: bool):
@@ -747,7 +753,6 @@ class ObjectDetector:
                 else:
                     self._log_detection(current_frame_id, detections_count=detections_count)
                     self.detection_map = {}
-
                 if save_frames:
                     im_path = f"{self.config['frames_folder']}/frame_{current_frame_id:04d}.jpg"
                     cv.imwrite(im_path, output_image)

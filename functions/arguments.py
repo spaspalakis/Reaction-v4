@@ -135,7 +135,9 @@ def get_arguments():
     )
 
     parser.add_argument(
+        "--raw-detections",
         action="store_true",
+        dest="raw_detections",
         help="Skip DeepSORT track confirmation; send model detections immediately (test mode for low-fps sync).",
     )
 

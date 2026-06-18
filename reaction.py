@@ -98,6 +98,8 @@ def main():
 
     if args.raw_detections:
         config["raw_detections"] = True
+    if args.debug_geo:
+        config["debug_geo"] = True
     if args.kafka_delay is not None:
         config["kafka_delay_sec"] = max(0.0, args.kafka_delay)
 
@@ -187,6 +189,7 @@ def main():
         selected_drone_id=args.drone_id,
         selected_drone_name=args.drone_name
     )
+    kafka_handler.debug_geo = bool(config.get("debug_geo"))
     kafka_handler.start()
     
     # Create detector instance
